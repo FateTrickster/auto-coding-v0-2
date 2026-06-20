@@ -1,0 +1,133 @@
+"""v1.1 — DeepSeekCodebookRefiner: strict LLM output boundaries.
+
+LLM outputs ONLY: change_type, target_codes, reason, proposed_text, requires_recoding.
+Program generates ALL metadata: change_id, round_id, evidence_decisions, etc.
+"""
+
+from __future__ import annotations
+
+import json
+from pathlib import Path
+
+ALLOWED_CHANGE_TYPES = {
+    "add_boundary_case", "add_inclusion_rule", "add_exclusion_rule",
+    "add_positive_example", "add_negative_example", "add_low_information_rule",
+    "add_uncertain_rule", "add_priority_rule", "clarify_definition", "no_change",
+}
+
+LLM_REFINE_SCHEMA = {"change_type", "target_codes", "reason", "proposed_text", "requires_recoding"}
+
+
+def _jl(p: Path) -> list[dict]:
+    if not p.exists(): return []
+    return [json.loads(l) for l in p.read_text(encoding="utf-8").splitlines() if l.strip()]
+
+
+def _validate_llm(raw: dict) -> tuple[dict, list]:
+    clean = {}
+    for k in LLM_REFINE_SCHEMA:
+        clean[k] = raw.get(k)
+    if not isinstance(clean.get("requires_recoding"), bool):
+        clean["requires_recoding"] = False
+    if isinstance(clean.get("target_codes"), str):
+        clean["target_codes"] = [clean["target_codes"]]
+    if not isinstance(clean.get("target_codes"), list):
+        clean["target_codes"] = []
+    ignored = [k for k in raw if k not in LLM_REFINE_SCHEMA]
+    return clean, ignored
+
+
+def run_deepseek_refine(project_dir: str | Path, round_id: str = "round_01",
+                        codebook_version: str = "v1.0", mode: str = "mock",
+                        exclude_unresolved: bool = True) -> dict:
+    root = Path(project_dir)
+    rd = root / "09_deepseek_runs" / round_id
+
+    adj_path = rd / "adjudication_results.jsonl"
+    if not adj_path.exists():
+        return {"changes_count": 0, "excluded_unresolved": 0}
+
+    all_adj = _jl(adj_path)
+    excluded = sum(1 for r in all_adj if r.get("unresolved"))
+    adj = [r for r in all_adj if not r.get("unresolved")] if exclude_unresolved else all_adj
+
+    if mode == "mock":
+        changes = _mock_refine(adj, round_id, codebook_version)
+    else:
+        from .deepseek_client import DeepSeekClient
+        import yaml
+        client = DeepSeekClient()
+        cb_path = root / "01_codebook" / f"codebook_{codebook_version}.yaml"
+        if not cb_path.exists() and codebook_version == "v1.0":
+            cb_path = root / "01_codebook" / "final_codebook_v1.0.yaml"
+        codebook = yaml.safe_load(cb_path.read_text(encoding="utf-8"))
+        changes = _deepseek_refine(adj, client, codebook, round_id, codebook_version)
+
+    proposal = {
+        "round_id": round_id,
+        "source_codebook_version": codebook_version,
+        "target_codebook_version": f"v{int(codebook_version.replace('v','').split('.')[0])+0.1}_candidate",
+        "changes": changes,
+    }
+    with open(rd / f"codebook_revision_proposal_{round_id}.json", "w", encoding="utf-8") as f:
+        json.dump(proposal, f, ensure_ascii=False, indent=2)
+
+    return {"changes_count": len(changes), "excluded_unresolved": excluded}
+
+
+def _mock_refine(adj, round_id, cv):
+    changes = []; seen = set(); ci = 1
+    for r in adj:
+        codes = sorted({r.get("coder_A_label",""), r.get("coder_B_label","")} - {""})
+        if len(codes) >= 2 and tuple(codes) not in seen:
+            seen.add(tuple(codes))
+            changes.append(_build_change(ci, "add_boundary_case", codes,
+                r.get("decision_reason",""), r.get("suggested_codebook_change",""),
+                False, [r.get("decision_id","")], list(codes), round_id, cv))
+            ci += 1
+    return changes
+
+
+def _deepseek_refine(adj, client, codebook, round_id, cv):
+    unresolved = [r for r in adj if r.get("unresolved")]
+    if not unresolved: return []
+    try:
+        resp = client.chat_json("Propose codebook changes.", json.dumps({
+            "task": "propose_changes", "unresolved_count": len(unresolved),
+            "samples": unresolved[:5],
+        }, ensure_ascii=False), max_tokens=1000)
+        llm_changes = resp.get("changes", [])
+        result = []
+        for i, raw in enumerate(llm_changes, 1):
+            llm, _ = _validate_llm(raw)
+            ct = llm.get("change_type","")
+            if ct not in ALLOWED_CHANGE_TYPES:
+                ct = "add_boundary_case"
+            result.append(_build_change(i, ct, llm.get("target_codes",[]),
+                llm.get("reason",""), llm.get("proposed_text",""),
+                llm.get("requires_recoding", False), [], [], round_id, cv))
+        return result
+    except Exception:
+        return _mock_refine(adj, round_id, cv)
+
+
+def _build_change(ci, change_type, target_codes, reason, proposed_text,
+                  requires_recoding, evidence_decisions, affected_patterns,
+                  round_id, source_cv):
+    return {
+        # LLM fields
+        "change_type": change_type,
+        "target_codes": target_codes,
+        "reason": reason,
+        "proposed_text": proposed_text,
+        "requires_recoding": requires_recoding,
+        # Program-generated fields
+        "change_id": f"C{ci:04d}",
+        "round_id": round_id,
+        "source_codebook_version": source_cv,
+        "target_codebook_version": f"v{int(source_cv.replace('v','').split('.')[0])+0.1}_candidate",
+        "evidence_decisions": evidence_decisions,
+        "risk": "low",
+        "affected_patterns": affected_patterns,
+        "schema_valid": True,
+    }

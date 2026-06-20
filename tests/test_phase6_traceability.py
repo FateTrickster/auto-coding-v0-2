@@ -1,0 +1,53 @@
+"""Phase 6 tests for traceability."""
+import json, tempfile, yaml, csv
+from pathlib import Path
+from auto_coding.codebook_schema import make_valid_code
+from auto_coding.self_loop_runner import SelfLoopRunner
+
+
+def _setup(d: Path):
+    (d / "00_inputs").mkdir(parents=True)
+    (d / "01_codebook").mkdir(parents=True); (d / "02_prompts").mkdir(parents=True)
+    (d / "04_pilot").mkdir(parents=True)
+    rows = [{"unit_id": f"u{i}", "unit_text": t, "context_before": "", "context_after": "",
+             "group_id": "g01", "speaker_id": "s1"}
+            for i, t in enumerate(["是不是", "谢谢", "okok", "无语", "我们来", "好的",
+                                   "没看懂", "不是吧", "那先算", "感觉会出问题"])]
+    with open(d / "04_pilot" / "pilot_sample_units.csv", "w", encoding="utf-8", newline="") as f:
+        w = csv.DictWriter(f, fieldnames=["unit_id","unit_text","context_before","context_after","group_id","speaker_id"])
+        w.writeheader(); w.writerows(rows)
+    cb = {"version": "v0.2_candidate", "codes": [
+        make_valid_code("IS1"),
+        make_valid_code("IS2"),
+        make_valid_code("IS3"),
+        make_valid_code("IS4"),
+    ]}
+    with open(d / "01_codebook" / "codebook_v0.2_candidate.yaml", "w", encoding="utf-8") as f:
+        yaml.dump(cb, f, allow_unicode=True)
+
+
+class TestTraceability:
+    def test_round_audit_log_records_codebook(self):
+        with tempfile.TemporaryDirectory() as d:
+            b = Path(d); _setup(b)
+            runner = SelfLoopRunner(b)
+            runner.run_round("round_01", "v0.2_candidate")
+            audit = (b / "04_pilot" / "round_01" / "round_audit_log.md").read_text(encoding="utf-8")
+            assert "v0.2_candidate" in audit
+
+    def test_self_loop_state_records_current_cv(self):
+        with tempfile.TemporaryDirectory() as d:
+            b = Path(d); _setup(b)
+            runner = SelfLoopRunner(b)
+            runner.run_loop("round_01", "v0.2_candidate")
+            with open(b / "99_logs" / "self_loop_state.json", encoding="utf-8") as f:
+                state = json.load(f)
+            assert "current_codebook_version" in state
+
+    def test_audit_log_records_all_rounds(self):
+        with tempfile.TemporaryDirectory() as d:
+            b = Path(d); _setup(b)
+            runner = SelfLoopRunner(b)
+            runner.run_loop("round_01", "v0.2_candidate")
+            audit = (b / "99_logs" / "self_loop_audit_log.md").read_text(encoding="utf-8")
+            assert "round_01" in audit

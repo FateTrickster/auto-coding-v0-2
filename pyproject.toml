@@ -1,0 +1,26 @@
+[project]
+name = "auto-coding-v2"
+version = "0.2.0"
+description = "Agentic coding system for collaborative learning dialogue analysis"
+requires-python = ">=3.11"
+dependencies = [
+    "pandas>=2.0",
+    "openpyxl>=3.1",
+    "pydantic>=2.0",
+    "pyyaml>=6.0",
+    "scikit-learn>=1.3",
+    "typer>=0.9",
+    "rich>=13.0",
+    "tenacity>=8.0",
+    "python-dotenv>=1.0",
+    "httpx>=0.25",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=7.0",
+]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["src"]

@@ -1,0 +1,37 @@
+# Secrets and local runtime configuration
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+*.p12
+*.pfx
+id_rsa
+id_ed25519
+
+# Python cache/build artifacts
+__pycache__/
+*.py[cod]
+*$py.class
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.venv/
+.coverage
+htmlcov/
+build/
+dist/
+*.egg-info/
+
+# Local run outputs and generated project data
+outputs/
+logs/
+tmp/
+temp/
+
+# Notebook / editor / OS noise
+.ipynb_checkpoints/
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
