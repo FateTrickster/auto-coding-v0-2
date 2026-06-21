@@ -2,6 +2,8 @@
 .env
 .env.*
 !.env.example
+publish_to_github.ps1
+local_publish_to_github.ps1
 *.pem
 *.key
 *.p12
