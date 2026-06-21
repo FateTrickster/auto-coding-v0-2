@@ -146,10 +146,13 @@ def run_pilot_coding(
     round_dir = project_dir / "04_pilot" / round_id
     round_dir.mkdir(parents=True, exist_ok=True)
 
-    # Load pilot units (prefer reviewed version, fall back to sampler output)
-    pilot_path = project_dir / "04_pilot" / "pilot_sample_units_v0.1.csv"
+    # Load pilot units
+    pilot_path = project_dir / "04_pilot" / "pilot_sample_units.csv"
     if not pilot_path.exists():
-        pilot_path = project_dir / "04_pilot" / "pilot_sample_units.csv"
+        raise FileNotFoundError(
+            f"Pilot sample not found: {pilot_path}\n"
+            f"Run `sample-pilot` first."
+        )
 
     with open(pilot_path, "r", encoding="utf-8", newline="") as f:
         units = list(csv.DictReader(f))

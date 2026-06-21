@@ -235,9 +235,12 @@ class CoderTrainingAgent:
         with open(cb_dir / f"codebook_{codebook_version}.yaml", "r", encoding="utf-8") as f:
             codebook = yaml.safe_load(f)
 
-        pilot = project_dir / "04_pilot" / "pilot_sample_units_v0.1.csv"
+        pilot = project_dir / "04_pilot" / "pilot_sample_units.csv"
         if not pilot.exists():
-            pilot = project_dir / "04_pilot" / "pilot_sample_units.csv"
+            raise FileNotFoundError(
+                f"Pilot sample not found: {pilot}\n"
+                f"Run `sample-pilot` first."
+            )
 
         # Step 1
         samples = self.select_training_samples(pilot)

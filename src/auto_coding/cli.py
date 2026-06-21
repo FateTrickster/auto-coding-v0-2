@@ -117,15 +117,6 @@ def build_risk_profile_cli(
           f"{r['boundary_patterns_count']} boundary patterns → {r['output_path']}")
 
 
-@app.command("review-pilot-sample")
-def review_pilot_sample_cli(project_dir: str = typer.Option(..., help="Project directory")):
-    from .pilot_sample_review import review
-    r = review(Path(project_dir)/"04_pilot"/"pilot_sample_units.csv",
-               Path(project_dir)/"03_units"/"unit_table_v0.1.csv",
-               Path(project_dir)/"04_pilot")
-    print(f"Pilot: {r['pilot_n']}/{r['total_units']} ({r['pilot_pct']}), groups={r['groups_covered']}")
-
-
 # ── Phase 2 command ───────────────────────────────────────
 
 @app.command("train-coders")

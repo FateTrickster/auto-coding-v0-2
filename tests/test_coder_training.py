@@ -142,7 +142,7 @@ class TestFullRun:
                 rows.append({"unit_id": f"u{i}", "unit_text": txt, "risk_flags": "",
                              "sample_reason": "", "group_id": "g01", "speaker_id": "s1",
                              "context_before": "", "context_after": ""})
-            _write_csv(base / "04_pilot" / "pilot_sample_units_v0.1.csv", rows)
+            _write_csv(base / "04_pilot" / "pilot_sample_units.csv", rows)
 
             agent = CoderTrainingAgent(max_items=30)
             result = agent.run(base, max_items=30)

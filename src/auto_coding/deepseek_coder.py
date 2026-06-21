@@ -85,9 +85,12 @@ def run_deepseek_coding(project_dir: str | Path, round_id: str = "round_01",
     if input_units_path:
         pilot_path = root / input_units_path
     else:
-        pilot_path = root / "04_pilot" / "pilot_sample_units_v0.1.csv"
+        pilot_path = root / "04_pilot" / "pilot_sample_units.csv"
         if not pilot_path.exists():
-            pilot_path = root / "04_pilot" / "pilot_sample_units.csv"
+            raise FileNotFoundError(
+                f"Pilot sample not found: {pilot_path}\n"
+                f"Run `sample-pilot` first."
+            )
     with open(pilot_path, "r", encoding="utf-8", newline="") as f:
         units = list(csv.DictReader(f))[:max_items]
 

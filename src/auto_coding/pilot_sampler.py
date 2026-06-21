@@ -417,6 +417,108 @@ def _sample_control_group(
     return selected, selected_ids, resolved
 
 
+# ── Coverage analysis ──────────────────────────────────────────
+
+def _analyze_sample_coverage(
+    all_rows: list[dict],
+    selected_rows: list[dict],
+    target_size: int,
+) -> dict:
+    """Analyze coverage of selected sample against full population.
+
+    Reuses existing structural detection functions for consistency.
+    Returns structured stats dict. Does NOT read/write files.
+    """
+    pop_count = len(all_rows)
+    samp_count = len(selected_rows)
+    selected_ids = {(r.get("unit_id") or "").strip() for r in selected_rows}
+
+    # ── Group coverage ───────────────────────────────────────
+    pop_groups = set(_norm_group(r.get("group_id")) for r in all_rows)
+    samp_groups = set(_norm_group(r.get("group_id")) for r in selected_rows)
+    missing_groups = sorted(pop_groups - samp_groups)
+
+    # ── Speaker coverage ─────────────────────────────────────
+    pop_speakers = set(_norm_group(r.get("speaker_id")) for r in all_rows)
+    samp_speakers = set(_norm_group(r.get("speaker_id")) for r in selected_rows)
+    missing_speakers = sorted(pop_speakers - samp_speakers)
+
+    # ── Structural type coverage (reuses existing predicates) ─
+    type_predicates = [
+        ("short_text", _is_structural_short),
+        ("long_text", _is_structural_long),
+        ("missing_context", _is_structural_missing_context),
+        ("multi_function", _is_structural_multi_function),
+    ]
+    structural_types: dict[str, dict] = {}
+    for name, pred in type_predicates:
+        pop_n = sum(1 for r in all_rows if pred(r))
+        samp_n = sum(1 for r in selected_rows if pred(r))
+        structural_types[name] = {
+            "population_count": pop_n,
+            "sampled_count": samp_n,
+            "covered": samp_n > 0 or pop_n == 0,
+        }
+
+    # ── Warnings & needs_resampling ──────────────────────────
+    warnings: list[str] = []
+    needs_resampling = False
+
+    # Group gap
+    if missing_groups and target_size >= len(pop_groups):
+        warnings.append(f"未覆盖 group: {missing_groups}")
+        needs_resampling = True
+
+    # Structural gap
+    for name, info in structural_types.items():
+        if info["population_count"] > 0 and info["sampled_count"] == 0:
+            warnings.append(f"结构类型 {name} 存在但样本未覆盖")
+            needs_resampling = True
+
+    # Count anomaly (warning only, not blocking)
+    theoretical_max = min(target_size, pop_count)
+    if samp_count < theoretical_max:
+        warnings.append(
+            f"样本数量 ({samp_count}) 少于理论可抽数量 ({theoretical_max})"
+        )
+
+    # Non-critical: partial speaker coverage
+    if missing_speakers:
+        warnings.append(f"部分 speaker 未覆盖: {missing_speakers}")
+
+    # Non-critical: target_size too small for full group coverage
+    if target_size < len(pop_groups):
+        warnings.append(
+            f"target_size ({target_size}) < group 总数 ({len(pop_groups)})，"
+            f"不可能覆盖全部 group"
+        )
+
+    # Non-critical: full_population scenario
+    if pop_count <= target_size:
+        warnings.append(
+            f"全量选取（总量 {pop_count} ≤ target {target_size}），无法评估抽样覆盖"
+        )
+
+    return {
+        "population_count": pop_count,
+        "sampled_count": samp_count,
+        "sample_ratio": samp_count / max(pop_count, 1),
+        "groups": {
+            "population_count": len(pop_groups),
+            "sampled_count": len(samp_groups),
+            "missing": missing_groups,
+        },
+        "speakers": {
+            "population_count": len(pop_speakers),
+            "sampled_count": len(samp_speakers),
+            "missing": missing_speakers,
+        },
+        "structural_types": structural_types,
+        "warnings": warnings,
+        "needs_resampling": needs_resampling,
+    }
+
+
 # ── Main entry point ─────────────────────────────────────────────
 
 def sample(
@@ -464,9 +566,10 @@ def sample(
     if input_count <= target_size:
         for row in valid_rows:
             row["_sample_reason"] = "full_population"
+        coverage = _analyze_sample_coverage(valid_rows, valid_rows, target_size)
         return _build_output(
             valid_rows, out_dir, target_size, input_count, seed,
-            config, None, {}, is_round01, rng,
+            config, None, {}, is_round01, coverage, rng,
         )
 
     # ── Pool targets ────────────────────────────────────────
@@ -561,9 +664,10 @@ def sample(
             final_selected.append(row)
             seen_final.add(uid)
 
+    coverage = _analyze_sample_coverage(valid_rows, final_selected, target_size)
     return _build_output(
         final_selected, out_dir, target_size, input_count, seed,
-        config, resolved_control, p2_counts, is_round01, rng,
+        config, resolved_control, p2_counts, is_round01, coverage, rng,
     )
 
 
@@ -579,6 +683,7 @@ def _build_output(
     resolved_control: str | None,
     p2_counts: dict[str, int],
     is_round01: bool,
+    coverage: dict,
     rng: random.Random,
 ) -> dict[str, Any]:
     out_dir.mkdir(parents=True, exist_ok=True)
@@ -673,11 +778,45 @@ def _build_output(
     if reason_counts.get("full_population", 0) > 0:
         lines.append(f"- full_population: {reason_counts['full_population']}")
 
+    # ── Coverage report sections ────────────────────────────
+    cov_groups = coverage.get("groups", {})
+    cov_speakers = coverage.get("speakers", {})
+    cov_structural = coverage.get("structural_types", {})
+
     lines += [
         "",
-        f"## {section + 1}. 覆盖统计",
-        f"- group 覆盖: {len(groups)}",
-        f"- speaker 覆盖: {len(speakers)}",
+        f"## {section + 1}. 样本覆盖审查",
+        "",
+        "### Group 覆盖",
+        f"- 完整数据 group 数: {cov_groups.get('population_count', '?')}",
+        f"- 样本覆盖 group 数: {cov_groups.get('sampled_count', '?')}",
+        f"- 未覆盖 group: {cov_groups.get('missing', [])}",
+        "",
+        "### Speaker 覆盖",
+        f"- 完整数据 speaker 数: {cov_speakers.get('population_count', '?')}",
+        f"- 样本覆盖 speaker 数: {cov_speakers.get('sampled_count', '?')}",
+        f"- 未覆盖 speaker: {cov_speakers.get('missing', [])}",
+        "",
+        "### 结构类型覆盖",
+        "| 类型 | 完整数据数量 | 样本数量 | 是否覆盖 |",
+        "|---|---:|---:|---|",
+    ]
+    for tname, tinfo in cov_structural.items():
+        lines.append(
+            f"| {tname} | {tinfo.get('population_count', 0)} | "
+            f"{tinfo.get('sampled_count', 0)} | "
+            f"{'✅' if tinfo.get('covered') else '❌'} |"
+        )
+
+    lines += [
+        "",
+        "### 补样判断",
+        f"- needs_resampling: {coverage.get('needs_resampling', False)}",
+        f"- warnings: {coverage.get('warnings', [])}",
+    ]
+
+    # Legacy group breakdown (keep for existing consumers)
+    lines += [
         "",
         "### 各 group 样本数量",
     ]
@@ -705,10 +844,13 @@ def _build_output(
         "sampled_count": sampled_count,
         "groups_covered": len(groups),
         "speakers_covered": len(speakers),
-        "high_risk_count": 0,  # no Round 1 hardcoded boundary
+        "high_risk_count": 0,
         "control_group_count": control_count,
         "risk_config_used": not is_round01,
         "control_group": resolved_control,
         "output_path": str(csv_path),
         "report_path": str(report_path),
+        "coverage": coverage,
+        "needs_resampling": coverage.get("needs_resampling", False),
+        "coverage_warnings": coverage.get("warnings", []),
     }

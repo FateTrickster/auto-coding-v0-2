@@ -309,3 +309,131 @@ class TestReproducibility:
             with open(Path(r2["output_path"]), encoding="utf-8-sig") as f:
                 ids2 = set(r["unit_id"] for r in csv.DictReader(f))
             assert ids1 != ids2
+
+
+class TestCoverageAnalysis:
+    def test_group_all_covered(self):
+        rows = []
+        for g in range(1, 6):
+            gid = f"g{g:02d}"
+            for i in range(20):
+                rows.append(_make_unit(f"{gid}_u{i:03d}", gid, f"s{i%3}", f"text_{gid}_{i}",
+                                       missing_context_flag="FALSE", short_text_flag="FALSE",
+                                       context_before="ctx"))
+        with tempfile.TemporaryDirectory() as d:
+            upath = Path(d) / "unit_table.csv"
+            _write_csv(upath, rows)
+            r = sample(upath, Path(d) / "out", target_size=50, seed=42)
+            assert r["coverage"]["groups"]["missing"] == []
+            assert not r["needs_resampling"]
+
+    def test_group_missing_triggers_resampling(self):
+        rows = []
+        for g in range(1, 6):
+            gid = f"g{g:02d}"
+            for i in range(20):
+                rows.append(_make_unit(f"{gid}_u{i:03d}", gid, f"s{i%3}", f"text_{gid}_{i}",
+                                       missing_context_flag="FALSE", short_text_flag="FALSE",
+                                       context_before="ctx"))
+        with tempfile.TemporaryDirectory() as d:
+            upath = Path(d) / "unit_table.csv"
+            _write_csv(upath, rows)
+            # target_size=5 barely covers 5 groups; Pool 1 only gets 4 slots (70%)
+            r = sample(upath, Path(d) / "out", target_size=5, seed=42)
+            # A group may be uncovered; with target=5 >= groups=5, this triggers resampling
+            if r["needs_resampling"]:
+                assert len(r["coverage"]["groups"]["missing"]) > 0
+            # target_size == len(groups) edge case: missing groups are a real gap
+            assert r["needs_resampling"] or len(r["coverage_warnings"]) > 0
+
+    def test_structural_type_coverage_stats(self):
+        rows = []
+        for g in range(1, 4):
+            gid = f"g{g:02d}"
+            for i in range(20):
+                is_short = (i % 5 == 0)
+                text = "ab" if is_short else f"普通文本_{gid}_{i}"
+                rows.append(_make_unit(f"{gid}_u{i:03d}", gid, f"s{i%3}", text,
+                                       short_text_flag="TRUE" if is_short else "FALSE",
+                                       missing_context_flag="FALSE",
+                                       context_before="ctx"))
+        with tempfile.TemporaryDirectory() as d:
+            upath = Path(d) / "unit_table.csv"
+            _write_csv(upath, rows)
+            r = sample(upath, Path(d) / "out", target_size=30, seed=42)
+            st = r["coverage"]["structural_types"]
+            assert st["short_text"]["population_count"] > 0
+            assert st["short_text"]["sampled_count"] > 0
+            assert st["short_text"]["covered"] is True
+
+    def test_no_false_positive_structural_gap(self):
+        """Type not existing in population should not trigger uncovered warning."""
+        rows = [_make_unit(f"u{i}", text=f"text{i}",
+                           missing_context_flag="FALSE", short_text_flag="FALSE",
+                           context_before="ctx")
+                for i in range(50)]
+        with tempfile.TemporaryDirectory() as d:
+            upath = Path(d) / "unit_table.csv"
+            _write_csv(upath, rows)
+            r = sample(upath, Path(d) / "out", target_size=20, seed=42)
+            st = r["coverage"]["structural_types"]
+            for tname, tinfo in st.items():
+                if tinfo["population_count"] == 0:
+                    assert tinfo["covered"] is True, f"{tname} should be covered when pop=0"
+
+    def test_full_population_coverage(self):
+        rows = [_make_unit(f"u{i}", text=f"text{i}") for i in range(5)]
+        with tempfile.TemporaryDirectory() as d:
+            upath = Path(d) / "unit_table.csv"
+            _write_csv(upath, rows)
+            r = sample(upath, Path(d) / "out", target_size=100, seed=42)
+            assert r["sampled_count"] == 5
+            assert r["coverage"]["sample_ratio"] == 1.0
+            assert any("全量选取" in w for w in r["coverage_warnings"])
+
+    def test_report_contains_coverage_sections(self):
+        rows = [_make_unit(f"u{i}", text=f"text{i}",
+                           missing_context_flag="FALSE", context_before="ctx")
+                for i in range(100)]
+        with tempfile.TemporaryDirectory() as d:
+            upath = Path(d) / "unit_table.csv"
+            _write_csv(upath, rows)
+            r = sample(upath, Path(d) / "out", target_size=30, seed=42)
+            report = Path(r["report_path"]).read_text(encoding="utf-8")
+            assert "样本覆盖审查" in report
+            assert "Group 覆盖" in report
+            assert "Speaker 覆盖" in report
+            assert "结构类型覆盖" in report
+            assert "补样判断" in report
+
+    def test_coverage_matches_csv(self):
+        rows = [_make_unit(f"u{i}", text=f"text{i}",
+                           missing_context_flag="FALSE", context_before="ctx")
+                for i in range(100)]
+        with tempfile.TemporaryDirectory() as d:
+            upath = Path(d) / "unit_table.csv"
+            _write_csv(upath, rows)
+            r = sample(upath, Path(d) / "out", target_size=30, seed=42)
+            with open(Path(r["output_path"]), encoding="utf-8-sig") as f:
+                csv_rows = list(csv.DictReader(f))
+            assert r["coverage"]["sampled_count"] == len(csv_rows)
+
+    def test_no_v01_file_generated(self):
+        rows = [_make_unit(f"u{i}", text=f"text{i}") for i in range(50)]
+        with tempfile.TemporaryDirectory() as d:
+            upath = Path(d) / "unit_table.csv"
+            _write_csv(upath, rows)
+            r = sample(upath, Path(d) / "out", target_size=20, seed=42)
+            out_dir = Path(r["output_path"]).parent
+            assert not (out_dir / "pilot_sample_units_v0.1.csv").exists()
+            assert not (out_dir / "pilot_sample_review_report.md").exists()
+
+    def test_return_keys_include_coverage(self):
+        rows = [_make_unit(f"u{i}", text=f"text{i}") for i in range(50)]
+        with tempfile.TemporaryDirectory() as d:
+            upath = Path(d) / "unit_table.csv"
+            _write_csv(upath, rows)
+            r = sample(upath, Path(d) / "out", target_size=20, seed=42)
+            assert "coverage" in r
+            assert "needs_resampling" in r
+            assert "coverage_warnings" in r
