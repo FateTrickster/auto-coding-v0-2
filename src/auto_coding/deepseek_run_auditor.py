@@ -129,6 +129,7 @@ def audit(project_dir: str | Path, run_dir: str = "09_deepseek_runs/round_01") -
 
     # ── Audit verdict ─────────────────────────────────────
     critical = [
+        n_a > 0, n_b > 0,  # must have results
         independence_ok,
         n_a == n_b,
         result.get("all_disagreements_have_decision", True),

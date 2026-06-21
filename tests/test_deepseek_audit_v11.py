@@ -10,9 +10,9 @@ class TestAudit:
         d = Path(d); rd = d / "09_deepseek_runs" / "round_01"; rd.mkdir(parents=True)
         (rd / "logs").mkdir(parents=True)
         with open(rd / "coder_A_results.jsonl", "w", encoding="utf-8") as f:
-            for i in range(3): f.write(json.dumps({"unit_id":f"u{i}","primary_code":a_code,"parse_ok":True,"cache_hit":False,"retry_count":0,"coder_id":"A","run_id":"rA"})+"\n")
+            for i in range(3): f.write(json.dumps({"unit_id":f"u{i}","primary_code":a_code,"parse_ok":True,"cache_hit":False,"retry_count":0,"coder_id":"A","run_id":"rA","raw_response_path":f"raw_A_u{i}.json","codebook_version":"v1.0","round_id":"round_01"})+"\n")
         with open(rd / "coder_B_results.jsonl", "w", encoding="utf-8") as f:
-            for i in range(3): f.write(json.dumps({"unit_id":f"u{i}","primary_code":b_code,"parse_ok":True,"cache_hit":False,"retry_count":0,"coder_id":"B","run_id":"rB"})+"\n")
+            for i in range(3): f.write(json.dumps({"unit_id":f"u{i}","primary_code":b_code,"parse_ok":True,"cache_hit":False,"retry_count":0,"coder_id":"B","run_id":"rB","raw_response_path":f"raw_B_u{i}.json","codebook_version":"v1.0","round_id":"round_01"})+"\n")
         with open(rd / "logs" / "deepseek_api_calls.jsonl", "w", encoding="utf-8") as f:
             f.write(json.dumps({"tokens":100,"elapsed_s":1.5})+"\n")
 
@@ -47,6 +47,20 @@ class TestAudit:
             self._setup(d)
             audit(d, "09_deepseek_runs/round_01")
             assert (Path(d) / "09_deepseek_runs" / "round_01" / "deepseek_run_audit_report.md").exists()
+
+    def test_audit_passes_with_complete_data(self):
+        with tempfile.TemporaryDirectory() as d:
+            self._setup(d)
+            r = audit(d, "09_deepseek_runs/round_01")
+            assert r["audit_passed"] is True
+
+    def test_audit_fails_with_missing_coder(self):
+        with tempfile.TemporaryDirectory() as d:
+            d = Path(d)
+            rd = d / "09_deepseek_runs" / "round_01"; rd.mkdir(parents=True)
+            (rd / "logs").mkdir(parents=True)
+            r = audit(d, "09_deepseek_runs/round_01")
+            assert r["audit_passed"] is False
 
 
 class TestStressTest:

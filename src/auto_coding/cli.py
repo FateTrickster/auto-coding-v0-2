@@ -420,7 +420,10 @@ def deepseek_self_loop_round_cli(
     print(f"[4/4] Audit...")
     from .deepseek_run_auditor import audit
     aud = audit(project_dir, f"09_deepseek_runs/{round_id}")
-    print(f"  Audit: {'PASS' if aud['audit_passed'] else 'FAIL'}")
+    passed = aud['audit_passed']
+    print(f"  Audit: {'PASS' if passed else 'FAIL'}")
+    if not passed:
+        raise typer.Exit(1)
 
 
 @app.command("audit-deepseek-run")

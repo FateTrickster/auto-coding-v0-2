@@ -76,9 +76,17 @@ def run_deepseek_coding(project_dir: str | Path, round_id: str = "round_01",
                         coder_a_profile: str = "default",
                         coder_b_profile: str = "default",
                         input_units_path: str | None = None,
-                        concurrency: int = 4) -> dict:
+                        concurrency: int = 4,
+                        overwrite: bool = False) -> dict:
     root = Path(project_dir)
     rd = root / "09_deepseek_runs" / round_id
+    if rd.exists() and not overwrite:
+        existing = list(rd.glob("coder_*_results.jsonl"))
+        if existing:
+            raise FileExistsError(
+                f"Round directory already has results: {rd}\n"
+                f"Use overwrite=True to replace."
+            )
     rd.mkdir(parents=True, exist_ok=True)
     log_dir = rd / "logs"; log_dir.mkdir(parents=True, exist_ok=True)
     ts = datetime.now(timezone.utc).isoformat()

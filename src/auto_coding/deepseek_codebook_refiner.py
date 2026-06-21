@@ -73,7 +73,10 @@ def run_deepseek_refine(project_dir: str | Path, round_id: str = "round_01",
     with open(rd / f"codebook_revision_proposal_{round_id}.json", "w", encoding="utf-8") as f:
         json.dump(proposal, f, ensure_ascii=False, indent=2)
 
-    return {"changes_count": len(changes), "excluded_unresolved": excluded}
+    status = "failed" if (mode != "mock" and not changes and eligible) else \
+             "not_needed" if (not eligible) else "success"
+    return {"changes_count": len(changes), "excluded_unresolved": excluded,
+            "refine_status": status}
 
 
 def _next_candidate_version(version: str) -> str:
