@@ -666,6 +666,131 @@ def sample(
 
 # ── Output ──────────────────────────────────────────────────────
 
+def _write_sample_csv(selected, out_dir, original_fieldnames):
+    csv_path = out_dir / "pilot_sample_units.csv"
+    csv_fields = [f for f in original_fieldnames if f != "sample_reason"]
+    if "sample_reason" not in csv_fields:
+        csv_fields.append("sample_reason")
+    with open(csv_path, "w", encoding="utf-8-sig", newline="") as f:
+        w = csv.DictWriter(f, fieldnames=csv_fields, extrasaction="ignore")
+        w.writeheader()
+        for row in selected:
+            out_row = {
+                k: ((row.get(k) or "").strip() if isinstance(row.get(k), str) else (row.get(k) or ""))
+                for k in csv_fields if k != "sample_reason"
+            }
+            out_row["sample_reason"] = row.get("_sample_reason", "")
+            w.writerow(out_row)
+    return csv_path
+
+
+def _write_sample_report(selected, out_dir, input_count, target_size, seed,
+                          config, resolved_control, is_round01, coverage):
+    report_path = out_dir / "pilot_sample_build_report.md"
+    rc = Counter(r.get("_sample_reason", "") for r in selected)
+    sc = len(selected)
+    exc = rc.get("explicit_unit", 0)
+    ctrl_count = rc.get("control_group", 0)
+    short_count = sum(1 for r in selected if _char_len(r.get("unit_text", "")) <= 10)
+    long_count = sum(1 for r in selected if _char_len(r.get("unit_text", "")) >= 100)
+
+    lines = [
+        "# Pilot Sample Build Report", "",
+        "## 1. 基本统计",
+        f"- 输入有效记录数: {input_count}",
+        f"- 目标样本数: {target_size}",
+        f"- 实际抽样数: {sc}",
+        f"- 随机种子: {seed}",
+        f"- 全量选取: {'是' if input_count <= target_size else '否'}",
+        f"- Round 模式: {'Round 1（代表性抽样 + 结构困难覆盖）' if is_round01 else 'Round 2+（含风险画像）'}",
+        "",
+    ]
+    if not is_round01:
+        src = config.get("source_round_id", "?")
+        tgt = config.get("target_round_id", "?")
+        lines.append("## 2. 风险画像信息")
+        lines.append(f"- 来源轮次: {src}")
+        lines.append(f"- 目标轮次: {tgt}")
+        lines.append(f"- 配置文件: {config.get('_path', '(未记录)')}")
+        lines.append(f"- explicit_units 带入: {exc}")
+        cps = config.get("confusion_pairs", [])
+        if cps:
+            lines.append(f"- confusion_pairs（报告信息，不用于抽样匹配）: {len(cps)} 对")
+            for cp in cps:
+                lines.append(f"  - {cp.get('codes', [])}: {cp.get('disagreement_count', '?')} 次分歧")
+        lines.append("")
+
+    section_base = 3 if is_round01 else 4
+    lines += [
+        f"## {section_base - 1}. 对照组",
+        f"- 对照组: {resolved_control or '(未指定)'}",
+    ]
+    if resolved_control is None:
+        lines.append("- Pool 3 已跳过，其配额由 random_fill 补齐。")
+    elif ctrl_count == 0:
+        lines.append(f"- ⚠️ 对照组 `{resolved_control}` 在数据中无匹配记录。")
+    lines.append("")
+
+    lines += [
+        f"## {section_base}. Pool 构成",
+        f"- group_stratified: {rc.get('group_stratified', 0)}",
+    ]
+    if exc > 0:
+        lines.append(f"- explicit_unit: {exc}")
+    lines += [
+        f"- structural_short_text: {rc.get('structural_short_text', 0)}",
+        f"- structural_long_text: {rc.get('structural_long_text', 0)}",
+        f"- structural_missing_context: {rc.get('structural_missing_context', 0)}",
+        f"- structural_multi_function: {rc.get('structural_multi_function', 0)}",
+        f"- control_group: {ctrl_count}",
+        f"- random_fill: {rc.get('random_fill', 0)}",
+    ]
+    if rc.get("full_population", 0) > 0:
+        lines.append(f"- full_population: {rc['full_population']}")
+
+    cov_g = coverage.get("groups", {})
+    cov_s = coverage.get("speakers", {})
+    cov_st = coverage.get("structural_types", {})
+
+    lines += [
+        "", f"## {section_base + 1}. 样本覆盖审查", "",
+        "### Group 覆盖",
+        f"- 完整数据 group 数: {cov_g.get('population_count', '?')}",
+        f"- 样本覆盖 group 数: {cov_g.get('sampled_count', '?')}",
+        f"- 未覆盖 group: {cov_g.get('missing', [])}",
+        "", "### Speaker 覆盖",
+        f"- 完整数据 speaker 数: {cov_s.get('population_count', '?')}",
+        f"- 样本覆盖 speaker 数: {cov_s.get('sampled_count', '?')}",
+        f"- 未覆盖 speaker: {cov_s.get('missing', [])}",
+        "", "### 结构类型覆盖",
+        "| 类型 | 完整数据数量 | 样本数量 | 是否覆盖 |",
+        "|---|---:|---:|---|",
+    ]
+    for tname, tinfo in cov_st.items():
+        lines.append(
+            f"| {tname} | {tinfo.get('population_count', 0)} | "
+            f"{tinfo.get('sampled_count', 0)} | "
+            f"{'✅' if tinfo.get('covered') else '❌'} |")
+    lines += [
+        "", "### 补样判断",
+        f"- needs_resampling: {coverage.get('needs_resampling', False)}",
+        f"- warnings: {coverage.get('warnings', [])}",
+    ]
+
+    lines += ["", "### 各 group 样本数量"]
+    group_counts = Counter(_norm_group(r.get("group_id")) for r in selected)
+    for g in sorted(group_counts, key=lambda g: (int(re.findall(r"\d+", g)[0]) if re.findall(r"\d+", g) else 9999, g)):
+        lines.append(f"- {g}: {group_counts[g]}")
+
+    lines += [
+        "", f"## {section_base + 2}. 文本长度统计",
+        f"- 短文本（≤10 字）: {short_count}",
+        f"- 长文本（≥100 字）: {long_count}",
+    ]
+    report_path.write_text("\n".join(lines), encoding="utf-8")
+    return report_path
+
+
 def _build_output(
     selected: list[dict],
     out_dir: Path,
@@ -681,168 +806,20 @@ def _build_output(
     rng: random.Random,
 ) -> dict[str, Any]:
     out_dir.mkdir(parents=True, exist_ok=True)
-
-    # ── CSV: preserve ALL original fields + append sample_reason ────
-    csv_path = out_dir / "pilot_sample_units.csv"
-    # Build field list: original fields (minus any prior sample_reason) + sample_reason
-    csv_fields = [f for f in original_fieldnames if f != "sample_reason"]
-    if "sample_reason" not in csv_fields:
-        csv_fields.append("sample_reason")
-
-    with open(csv_path, "w", encoding="utf-8-sig", newline="") as f:
-        writer = csv.DictWriter(f, fieldnames=csv_fields, extrasaction="ignore")
-        writer.writeheader()
-        for row in selected:
-            # Preserve all original fields, strip str values, add sample_reason
-            out_row = {
-                k: ((row.get(k) or "").strip() if isinstance(row.get(k), str) else (row.get(k) or ""))
-                for k in csv_fields
-                if k != "sample_reason"
-            }
-            out_row["sample_reason"] = row.get("_sample_reason", "")
-            writer.writerow(out_row)
-
-    # ── Stats ───────────────────────────────────────────────
-    sampled_count = len(selected)
-    groups = set(_norm_group(r.get("group_id")) for r in selected)
-    speakers = set(_norm_group(r.get("speaker_id")) for r in selected)
-    reason_counts = Counter(r.get("_sample_reason", "") for r in selected)
-
-    control_count = reason_counts.get("control_group", 0)
-    short_count = sum(1 for r in selected if _char_len(r.get("unit_text", "")) <= 10)
-    long_count = sum(1 for r in selected if _char_len(r.get("unit_text", "")) >= 100)
-
-    # Round 2+ info
-    explicit_count = reason_counts.get("explicit_unit", 0)
-    confusion_pairs = config.get("confusion_pairs", [])
-
-    # ── Report ──────────────────────────────────────────────
-    report_path = out_dir / "pilot_sample_build_report.md"
-    lines = [
-        "# Pilot Sample Build Report",
-        "",
-        "## 1. 基本统计",
-        f"- 输入有效记录数: {input_count}",
-        f"- 目标样本数: {target_size}",
-        f"- 实际抽样数: {sampled_count}",
-        f"- 随机种子: {seed}",
-        f"- 全量选取: {'是' if input_count <= target_size else '否'}",
-        f"- Round 模式: {'Round 1（代表性抽样 + 结构困难覆盖）' if is_round01 else 'Round 2+（含风险画像）'}",
-        "",
-    ]
-
-    if not is_round01:
-        src = config.get("source_round_id", "?")
-        tgt = config.get("target_round_id", "?")
-        lines.append(f"## 2. 风险画像信息")
-        lines.append(f"- 来源轮次: {src}")
-        lines.append(f"- 目标轮次: {tgt}")
-        lines.append(f"- 配置文件: {config.get('_path', '(未记录)')}")
-        lines.append(f"- explicit_units 带入: {explicit_count}")
-        if confusion_pairs:
-            lines.append(f"- confusion_pairs（报告信息，不用于抽样匹配）: {len(confusion_pairs)} 对")
-            for cp in confusion_pairs:
-                codes = cp.get("codes", [])
-                cnt = cp.get("disagreement_count", "?")
-                lines.append(f"  - {codes}: {cnt} 次分歧")
-        lines.append("")
-
-    lines += [
-        f"## {3 if not is_round01 else 2}. 对照组",
-        f"- 对照组: {resolved_control or '(未指定)'}",
-    ]
-    if resolved_control is None:
-        lines.append("- Pool 3 已跳过，其配额由 random_fill 补齐。")
-    elif control_count == 0:
-        lines.append(f"- ⚠️ 对照组 `{resolved_control}` 在数据中无匹配记录。")
-    lines.append("")
-
-    section = 4 if not is_round01 else 3
-    lines += [
-        f"## {section}. Pool 构成",
-        f"- group_stratified: {reason_counts.get('group_stratified', 0)}",
-    ]
-    if explicit_count > 0:
-        lines.append(f"- explicit_unit: {explicit_count}")
-    lines += [
-        f"- structural_short_text: {reason_counts.get('structural_short_text', 0)}",
-        f"- structural_long_text: {reason_counts.get('structural_long_text', 0)}",
-        f"- structural_missing_context: {reason_counts.get('structural_missing_context', 0)}",
-        f"- structural_multi_function: {reason_counts.get('structural_multi_function', 0)}",
-        f"- control_group: {control_count}",
-        f"- random_fill: {reason_counts.get('random_fill', 0)}",
-    ]
-    if reason_counts.get("full_population", 0) > 0:
-        lines.append(f"- full_population: {reason_counts['full_population']}")
-
-    # ── Coverage report sections ────────────────────────────
-    cov_groups = coverage.get("groups", {})
-    cov_speakers = coverage.get("speakers", {})
-    cov_structural = coverage.get("structural_types", {})
-
-    lines += [
-        "",
-        f"## {section + 1}. 样本覆盖审查",
-        "",
-        "### Group 覆盖",
-        f"- 完整数据 group 数: {cov_groups.get('population_count', '?')}",
-        f"- 样本覆盖 group 数: {cov_groups.get('sampled_count', '?')}",
-        f"- 未覆盖 group: {cov_groups.get('missing', [])}",
-        "",
-        "### Speaker 覆盖",
-        f"- 完整数据 speaker 数: {cov_speakers.get('population_count', '?')}",
-        f"- 样本覆盖 speaker 数: {cov_speakers.get('sampled_count', '?')}",
-        f"- 未覆盖 speaker: {cov_speakers.get('missing', [])}",
-        "",
-        "### 结构类型覆盖",
-        "| 类型 | 完整数据数量 | 样本数量 | 是否覆盖 |",
-        "|---|---:|---:|---|",
-    ]
-    for tname, tinfo in cov_structural.items():
-        lines.append(
-            f"| {tname} | {tinfo.get('population_count', 0)} | "
-            f"{tinfo.get('sampled_count', 0)} | "
-            f"{'✅' if tinfo.get('covered') else '❌'} |"
-        )
-
-    lines += [
-        "",
-        "### 补样判断",
-        f"- needs_resampling: {coverage.get('needs_resampling', False)}",
-        f"- warnings: {coverage.get('warnings', [])}",
-    ]
-
-    # Legacy group breakdown (keep for existing consumers)
-    lines += [
-        "",
-        "### 各 group 样本数量",
-    ]
-
-    def _group_sort_key(g: str) -> tuple:
-        nums = re.findall(r"\d+", g)
-        return (int(nums[0]), g) if nums else (9999, g)
-
-    group_counts = Counter(_norm_group(r.get("group_id")) for r in selected)
-    for g in sorted(group_counts, key=_group_sort_key):
-        lines.append(f"- {g}: {group_counts[g]}")
-
-    lines += [
-        "",
-        f"## {section + 2}. 文本长度统计",
-        f"- 短文本（≤10 字）: {short_count}",
-        f"- 长文本（≥100 字）: {long_count}",
-    ]
-
-    report_path.write_text("\n".join(lines), encoding="utf-8")
-
+    csv_path = _write_sample_csv(selected, out_dir, original_fieldnames)
+    report_path = _write_sample_report(
+        selected, out_dir, input_count, target_size, seed, config,
+        resolved_control, is_round01, coverage,
+    )
+    rc = Counter(r.get("_sample_reason", "") for r in selected)
     return {
         "input_count": input_count,
         "target_size": target_size,
-        "sampled_count": sampled_count,
-        "groups_covered": len(groups),
-        "speakers_covered": len(speakers),
+        "sampled_count": len(selected),
+        "groups_covered": len(set(_norm_group(r.get("group_id")) for r in selected)),
+        "speakers_covered": len(set(_norm_group(r.get("speaker_id")) for r in selected)),
         "high_risk_count": 0,
-        "control_group_count": control_count,
+        "control_group_count": rc.get("control_group", 0),
         "risk_config_used": not is_round01,
         "control_group": resolved_control,
         "output_path": str(csv_path),

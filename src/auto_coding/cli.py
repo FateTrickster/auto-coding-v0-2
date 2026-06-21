@@ -371,14 +371,11 @@ def build_audit_sample_cli(
 ):
     """Build stratified audit sample for human + DeepSeek validation."""
     from .audit_sample_builder import build_audit_sample
-    from .deepseek_validation_report import generate_placeholder_report
     m = build_audit_sample(project_dir, target_size=target_size, seed=seed)
-    r = generate_placeholder_report(project_dir)
     print(f"Audit sample: {m['actual_size']} units (target={m['target_size']})")
     print(f"Labels: {m['label_distribution']}")
     print(f"Disagreement: {m['disagreement_samples']}, Risk: {m['risk_samples']}")
     print(f"Template: {m['template_path']}")
-    print(f"Validation status: {r['status']}")
 
 
 @app.command("write-human-audit-instructions")
@@ -503,20 +500,6 @@ def audit_deepseek_run_cli(
     print(f"Agreement: {r.get('agreement_count','?')}/{r.get('agreement_pairs','?')} ({r.get('agreement_pct','?')})")
     print(f"API calls: {r.get('api_real_calls',0)}, Tokens: {r.get('api_tokens',0)}")
     print(f"Audit: {'PASS' if r.get('audit_passed') else 'FAIL'}")
-
-
-@app.command("deepseek-adjudication-stress-test")
-def deepseek_stress_test_cli(
-    project_dir: str = typer.Option(..., help="Project directory"),
-    source_run_dir: str = typer.Option("09_deepseek_runs/round_01_30"),
-    max_cases: int = typer.Option(5),
-    mode: str = typer.Option("mock"),
-):
-    """Run stress test for adjudication/refiner pipeline."""
-    from .deepseek_stress_test import run_stress_test
-    r = run_stress_test(project_dir, source_run_dir, max_cases, mode)
-    print(f"Stress test: {r['total']} cases, resolved={r['resolved']}")
-    print("WARNING: Stress test results are artificially constructed. Do NOT use as real coding results.")
 
 
 if __name__ == "__main__":
