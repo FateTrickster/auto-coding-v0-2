@@ -134,7 +134,7 @@ class TestBuildRiskConfig:
             assert len(patterns) >= 1
             assert patterns[0]["match_type"] == "label_pair"
             assert patterns[0]["pattern"] == "IS2-IS3"
-            assert patterns[0]["status"] == "candidate"
+            assert "evidence_ids" in patterns[0]
 
     def test_does_not_extract_keywords_from_unit_text(self):
         """boundary_patterns should NOT contain natural-language keywords from unit_text."""
@@ -150,7 +150,7 @@ class TestBuildRiskConfig:
                 assert p["match_type"] == "label_pair"
                 assert p["source"] == "codebook_revision_proposal"
 
-    def test_all_items_have_status_and_evidence_ids(self):
+    def test_all_items_have_evidence_ids(self):
         with tempfile.TemporaryDirectory() as d:
             b = Path(d)
             self._setup_round01_outputs(b)
@@ -159,19 +159,13 @@ class TestBuildRiskConfig:
                 config = yaml.safe_load(f)
 
             for eu in config["explicit_units"]:
-                assert "status" in eu, f"Missing status in {eu['unit_id']}"
                 assert "evidence_ids" in eu, f"Missing evidence_ids in {eu['unit_id']}"
-                assert eu["status"] == "candidate"
 
             for cp in config["confusion_pairs"]:
-                assert "status" in cp
                 assert "evidence_ids" in cp
-                assert cp["status"] == "candidate"
 
             for bp in config["boundary_patterns"]:
-                assert "status" in bp
                 assert "evidence_ids" in bp
-                assert bp["status"] == "candidate"
 
     def test_writes_to_risk_profiles_not_00_inputs(self):
         with tempfile.TemporaryDirectory() as d:

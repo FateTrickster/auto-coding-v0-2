@@ -146,12 +146,8 @@ def _update_three_way(path: Path, has_deepseek: bool):
 
 
 def _cohen_kappa(a: list[str], b: list[str]) -> float:
-    from sklearn.metrics import cohen_kappa_score
-    try:
-        k = cohen_kappa_score(a, b)
-        return 0.0 if math.isnan(k) else float(k)
-    except Exception:
-        return 0.0
+    from .reliability import _cohen_kappa as _ck
+    return _ck(a, b, weighted=False)
 
 
 def _confusion_matrix(a: list[str], b: list[str]) -> dict:

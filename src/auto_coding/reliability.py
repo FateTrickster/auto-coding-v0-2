@@ -126,15 +126,45 @@ def compute_reliability(project_dir: str | Path, round_id: str = "round_01") -> 
 # ── Internal metrics ──────────────────────────────────────
 
 def _cohen_kappa(a: list[str], b: list[str], weighted: bool = False) -> float:
-    """Compute Cohen's Kappa (unweighted or linear weighted)."""
-    from sklearn.metrics import cohen_kappa_score
-    try:
-        k = cohen_kappa_score(a, b, weights="linear" if weighted else None)
-        if math.isnan(k):
-            return 1.0 if (len(set(a)) == 1 and a == b) else 0.0
-        return float(k)
-    except Exception:
+    """Compute Cohen's Kappa (unweighted or linear weighted). Pure Python, no sklearn."""
+    if not a or len(a) != len(b):
         return 0.0
+    n = len(a)
+    if n == 0:
+        return 0.0
+    # Single-label case: if all identical, perfect agreement
+    if len(set(a)) == 1 and a == b:
+        return 1.0
+    # Build label set from both raters
+    labels = sorted(set(a) | set(b))
+    n_labels = len(labels)
+    if n_labels <= 1:
+        return 1.0 if a == b else 0.0
+    label_to_idx = {l: i for i, l in enumerate(labels)}
+
+    # Confusion matrix
+    cm = [[0] * n_labels for _ in range(n_labels)]
+    for ai, bi in zip(a, b):
+        cm[label_to_idx[ai]][label_to_idx[bi]] += 1
+
+    # Weight matrix for linear weighting
+    if weighted:
+        w = [[1.0 - abs(i - j) / (n_labels - 1) for j in range(n_labels)] for i in range(n_labels)]
+    else:
+        w = [[1.0 if i == j else 0.0 for j in range(n_labels)] for i in range(n_labels)]
+
+    # Observed agreement
+    po = sum(cm[i][j] * w[i][j] for i in range(n_labels) for j in range(n_labels)) / n
+
+    # Expected agreement
+    row_sum = [sum(cm[i]) for i in range(n_labels)]
+    col_sum = [sum(cm[i][j] for i in range(n_labels)) for j in range(n_labels)]
+    pe = sum(row_sum[i] * col_sum[j] * w[i][j] for i in range(n_labels) for j in range(n_labels)) / (n * n)
+
+    if abs(1.0 - pe) < 1e-12:
+        return 1.0
+    k = (po - pe) / (1.0 - pe)
+    return float(max(-1.0, min(1.0, k)))
 
 
 def _krippendorff_alpha(a: list[str], b: list[str]) -> float:

@@ -2,7 +2,7 @@
 import json, csv, tempfile
 from pathlib import Path
 from auto_coding.deepseek_run_auditor import audit
-from auto_coding.deepseek_stress_test import run_stress_test
+from tests.helpers.deepseek_stress_test import run_stress_test
 
 
 class TestAudit:

@@ -66,7 +66,7 @@ def run_stress_test(project_dir: str | Path, source_run_dir: str,
     _save_jl(tmp / "coder_B_results.jsonl", b_stress)
 
     # Run adjudication
-    from .deepseek_adjudicator import run_deepseek_adjudication
+    from auto_coding.deepseek_adjudicator import run_deepseek_adjudication
     # Hack: use a temp project dir pointing to the stress tmp
     import shutil, tempfile
     adj_result = {"total": 0, "resolved": 0, "unresolved": 0}

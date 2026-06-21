@@ -123,3 +123,39 @@ class TestComputeReliability:
             _write_jsonl(rd / "coder_B_results.jsonl", b)
             m = compute_reliability(str(base))
             assert m["krippendorff_alpha"] >= 0.9
+
+
+class TestCohenKappa:
+    def test_perfect_agreement(self):
+        from auto_coding.reliability import _cohen_kappa
+        a = ["IS2", "IS2", "IS3", "IS3"]
+        b = ["IS2", "IS2", "IS3", "IS3"]
+        k = _cohen_kappa(a, b)
+        assert abs(k - 1.0) < 0.01
+
+    def test_complete_disagreement(self):
+        from auto_coding.reliability import _cohen_kappa
+        a = ["IS1", "IS1", "IS1", "IS1"]
+        b = ["IS4", "IS4", "IS4", "IS4"]
+        k = _cohen_kappa(a, b)
+        assert k < 0.1
+
+    def test_weighted_kappa(self):
+        from auto_coding.reliability import _cohen_kappa
+        a = ["IS1", "IS2", "IS3", "IS4"]
+        b = ["IS2", "IS2", "IS3", "IS4"]
+        k_w = _cohen_kappa(a, b, weighted=True)
+        k_uw = _cohen_kappa(a, b, weighted=False)
+        assert k_w >= k_uw  # weighted should be >= unweighted for adjacent disagreement
+
+    def test_single_label_all_same(self):
+        from auto_coding.reliability import _cohen_kappa
+        a = ["IS2", "IS2", "IS2"]
+        b = ["IS2", "IS2", "IS2"]
+        k = _cohen_kappa(a, b)
+        assert abs(k - 1.0) < 0.01
+
+    def test_edge_empty(self):
+        from auto_coding.reliability import _cohen_kappa
+        assert _cohen_kappa([], []) == 0.0
+        assert _cohen_kappa(["IS1"], []) == 0.0

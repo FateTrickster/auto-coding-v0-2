@@ -144,7 +144,6 @@ def _build_explicit_units(
                 "confused_codes": confused,
                 "source": "disagreement_table",
                 "evidence_ids": [uid],
-                "status": "candidate",
             })
 
     # From adjudication: unresolved items
@@ -165,7 +164,6 @@ def _build_explicit_units(
                 "confused_codes": confused,
                 "source": "adjudication_results",
                 "evidence_ids": [decision_id] if decision_id else [uid],
-                "status": "candidate",
             })
 
     return units
@@ -267,7 +265,6 @@ def _build_boundary_patterns(
                     else [change_id] if change_id
                     else decision_ids[:5]
                 ),
-                "status": "candidate",
             })
 
     return patterns
