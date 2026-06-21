@@ -214,8 +214,8 @@ def _sample_within_group(
 
     Strategy:
     1. Build per-speaker pools
-    2. Bucket by position (turn_id / source_row_id) if field exists
-    3. Round-robin across speakers, then within-speaker random
+    2. Sort within-speaker by turn_id/source_row_id for order preservation
+    3. Round-robin across speakers, selecting earliest unselected from each
     """
 
     # ── Per-speaker grouping ──────────────────────────────

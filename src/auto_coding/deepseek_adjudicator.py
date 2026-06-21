@@ -36,17 +36,42 @@ def run_deepseek_adjudication(project_dir: str | Path, round_id: str = "round_01
     rd = root / "09_deepseek_runs" / round_id; ts = datetime.now(timezone.utc).isoformat()
 
     a = _jl(rd / "coder_A_results.jsonl"); b = _jl(rd / "coder_B_results.jsonl")
-    if not a or not b: return {"total": 0, "resolved": 0, "unresolved": 0}
+    if not a or not b: return {"total": 0, "resolved": 0, "unresolved": 0,
+                               "low_confidence_agreement_count": 0}
 
     am = {r["unit_id"]: r for r in a}; bm = {r["unit_id"]: r for r in b}
     dis = []
+    low_conf_agree = []
+    confidence_threshold = 0.70
+
     for uid in sorted(set(am) | set(bm)):
         ra = am.get(uid, {}); rb = bm.get(uid, {})
         if not ra.get("parse_ok") or not rb.get("parse_ok"): continue
         la = ra.get("primary_code"); lb = rb.get("primary_code")
-        if la == lb: continue
+        if la == lb:
+            # Low-confidence agreement watchlist
+            ca = float(ra.get("confidence", 0.5) or 0.5)
+            cb = float(rb.get("confidence", 0.5) or 0.5)
+            ua = ra.get("uncertain", False)
+            ub = rb.get("uncertain", False)
+            if ca < confidence_threshold or cb < confidence_threshold or ua or ub:
+                low_conf_agree.append({
+                    "unit_id": uid, "coder_A_label": la, "coder_B_label": lb,
+                    "coder_A_confidence": ca, "coder_B_confidence": cb,
+                    "coder_A_uncertain": ua, "coder_B_uncertain": ub,
+                    "coder_A_reason": ra.get("reason", ""),
+                    "coder_B_reason": rb.get("reason", ""),
+                })
+            continue
         dis.append({"unit_id": uid, "unit_text": "", "coder_A_label": la or "", "coder_B_label": lb or "",
                     "coder_A_reason": ra.get("reason",""), "coder_B_reason": rb.get("reason","")})
+
+    # Write low-confidence agreement watchlist
+    if low_conf_agree:
+        _save(rd / "low_confidence_agreement_items.jsonl", low_conf_agree)
+        with open(rd / "low_confidence_agreement_items.csv", "w", encoding="utf-8", newline="") as f:
+            w = csv.DictWriter(f, fieldnames=list(low_conf_agree[0].keys()))
+            w.writeheader(); w.writerows(low_conf_agree)
 
     if dis:
         with open(rd / "disagreement_table.csv", "w", encoding="utf-8", newline="") as f:
@@ -74,7 +99,8 @@ def run_deepseek_adjudication(project_dir: str | Path, round_id: str = "round_01
                     resolution_attempts=2)
     _save(rd / "adjudication_results.jsonl", results)
     un = sum(1 for r in results if r.get("unresolved"))
-    return {"total": len(results), "resolved": len(results) - un, "unresolved": un}
+    return {"total": len(results), "resolved": len(results) - un, "unresolved": un,
+            "low_confidence_agreement_count": len(low_conf_agree)}
 
 
 def _load_valid_labels(root, cv):

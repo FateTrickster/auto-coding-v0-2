@@ -164,13 +164,27 @@ def _code_units(units, coder_id, system, client, valid, rd, log_dir, ts, cv, rou
 
 def _code_units_concurrent(units, prompt_a, prompt_b, valid, rd, log_dir, ts,
                             cv, round_id, concurrency):
-    """Run A/B coding concurrently. Each worker gets its own DeepSeekClient."""
+    """Run A/B coding concurrently. Each task creates its own client.
+    API logs and retry counts are collected and aggregated by the main thread.
+    """
     from .deepseek_client import DeepSeekClient
     from concurrent.futures import ThreadPoolExecutor, as_completed
+
+    if concurrency < 1:
+        raise ValueError(f"concurrency must be >= 1, got {concurrency}")
+
+    # Check for duplicate unit_ids before processing
+    uids = [u.get("unit_id", "").strip() for u in units]
+    seen = set()
+    for uid in uids:
+        if uid in seen:
+            raise ValueError(f"Duplicate unit_id in input: {uid}")
+        seen.add(uid)
 
     tasks = [(u, "A", prompt_a) for u in units] + [(u, "B", prompt_b) for u in units]
     results_a: dict[str, dict] = {}
     results_b: dict[str, dict] = {}
+    all_call_logs: list[dict] = []
 
     def _code_one(task):
         unit, coder_id, prompt = task
@@ -187,28 +201,31 @@ def _code_units_concurrent(units, prompt_a, prompt_b, valid, rd, log_dir, ts,
             if client.cache_dir and (client.cache_dir / f"{cache_key}.json").exists():
                 cache_hit = True
             resp = client.chat_json(prompt, user, max_tokens=800)
+            retry_count = client.last_retry_count
             llm, ignored = _validate_llm_output(resp)
             code = llm.get("primary_code", "")
             raw_path = log_dir / f"raw_{coder_id}_{uid}.json"
             raw_path.write_text(json.dumps(resp, ensure_ascii=False), encoding="utf-8")
             if code not in valid:
                 return _build_result(uid, coder_id, None, False,
-                    f"invalid_code:{code}", ts, cv, round_id, cache_hit, retry_count, str(raw_path))
+                    f"invalid_code:{code}", ts, cv, round_id, cache_hit, retry_count, str(raw_path)), client.call_log
             return _build_result(uid, coder_id, code, True, "",
                 ts, cv, round_id, cache_hit, retry_count, str(raw_path),
                 confidence=llm.get("confidence", 0.7),
                 evidence_span=llm.get("evidence_span", text[:60]),
                 reason=llm.get("reason", ""),
                 uncertain=llm.get("uncertain", False),
-                ignored_fields=ignored)
+                ignored_fields=ignored), client.call_log
         except Exception as e:
+            retry_count = getattr(client, 'last_retry_count', 0)
             return _build_result(uid, coder_id, None, False,
-                str(e), ts, cv, round_id, cache_hit, retry_count, "")
+                str(e), ts, cv, round_id, cache_hit, retry_count, ""), client.call_log
 
-    with ThreadPoolExecutor(max_workers=max(1, concurrency)) as executor:
+    with ThreadPoolExecutor(max_workers=concurrency) as executor:
         futures = {executor.submit(_code_one, t): t for t in tasks}
         for future in as_completed(futures):
-            result = future.result()
+            result, call_log = future.result()
+            all_call_logs.extend(call_log)
             cid = result.get("coder_id", "")
             uid = result.get("unit_id", "")
             if cid == "A":
@@ -216,10 +233,23 @@ def _code_units_concurrent(units, prompt_a, prompt_b, valid, rd, log_dir, ts,
             else:
                 results_b[uid] = result
 
+    # Write unified API log (main thread, single writer)
+    if all_call_logs:
+        _write_api_log(log_dir, all_call_logs)
+
     # Preserve input order
     ra_list = [results_a[u.get("unit_id", "")] for u in units if u.get("unit_id", "") in results_a]
     rb_list = [results_b[u.get("unit_id", "")] for u in units if u.get("unit_id", "") in results_b]
     return ra_list, rb_list
+
+
+def _write_api_log(log_dir: Path, entries: list[dict]) -> None:
+    """Write unified API call log — single writer, thread-safe by invocation timing."""
+    log_dir.mkdir(parents=True, exist_ok=True)
+    p = log_dir / "deepseek_api_calls.jsonl"
+    with open(p, "a", encoding="utf-8") as f:
+        for entry in entries:
+            f.write(json.dumps(entry, ensure_ascii=False) + "\n")
 
 
 def _mock_results(mock_items, coder_id, rd, ts):

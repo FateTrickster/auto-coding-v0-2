@@ -30,6 +30,7 @@ class DeepSeekClient:
             self.cache_dir.mkdir(parents=True, exist_ok=True)
         self.call_log: list[dict] = []
         self.total_tokens = 0
+        self.last_retry_count = 0
 
     def _check(self):
         if os.getenv("RUN_REAL_DEEPSEEK") != "1":
@@ -50,6 +51,7 @@ class DeepSeekClient:
         for attempt in range(1, self.max_retries + 1):
             try:
                 result = self._call(system, user, max_tokens)
+                self.last_retry_count = attempt - 1  # 0 on first success
                 if self.cache_dir:
                     self._cache_set(cache_key, result)
                 return result
@@ -57,6 +59,7 @@ class DeepSeekClient:
                 last_err = e
                 if attempt < self.max_retries:
                     time.sleep(2 ** attempt)
+        self.last_retry_count = self.max_retries
         raise RuntimeError(f"DeepSeek failed after {self.max_retries} retries: {last_err}")
 
     def _call(self, system: str, user: str, max_tokens: int) -> dict:

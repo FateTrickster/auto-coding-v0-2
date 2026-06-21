@@ -443,7 +443,8 @@ def deepseek_adjudicate_cli(
     """Adjudicate DeepSeek disagreements."""
     from .deepseek_adjudicator import run_deepseek_adjudication
     r = run_deepseek_adjudication(project_dir, round_id, codebook_version, mode)
-    print(f"Adjudicated: {r['total']} (resolved={r['resolved']}, unresolved={r['unresolved']})")
+    print(f"Adjudicated: {r['total']} (resolved={r['resolved']}, unresolved={r['unresolved']}, "
+          f"low_conf_agree={r.get('low_confidence_agreement_count', 0)})")
 
 
 @app.command("deepseek-refine-codebook")
@@ -466,17 +467,20 @@ def deepseek_self_loop_round_cli(
     codebook_version: str = typer.Option("v1.0"),
     mode: str = typer.Option("mock"),
     max_items: int = typer.Option(30),
+    concurrency: int = typer.Option(4, help="Number of concurrent DeepSeek requests. Use 1 for sequential."),
 ):
     """Run one round of DeepSeek self-loop: code → adjudicate → refine."""
     from .deepseek_coder import run_deepseek_coding
     from .deepseek_adjudicator import run_deepseek_adjudication
     from .deepseek_codebook_refiner import run_deepseek_refine
     print(f"[1/3] DeepSeek coding...")
-    c = run_deepseek_coding(project_dir, round_id, codebook_version, mode, max_items)
+    c = run_deepseek_coding(project_dir, round_id, codebook_version, mode, max_items,
+                            concurrency=concurrency)
     print(f"  A={c['coder_a_ok']}/{c['coder_a_total']}, B={c['coder_b_ok']}/{c['coder_b_total']}")
     print(f"[2/3] DeepSeek adjudication...")
     a = run_deepseek_adjudication(project_dir, round_id, codebook_version, mode)
-    print(f"  Resolved={a['resolved']}, Unresolved={a['unresolved']}")
+    print(f"  Resolved={a['resolved']}, Unresolved={a['unresolved']}, "
+          f"LowConfAgree={a.get('low_confidence_agreement_count', 0)}")
     print(f"[3/3] DeepSeek refine...")
     r = run_deepseek_refine(project_dir, round_id, codebook_version, mode)
     print(f"  Changes={r['changes_count']}")

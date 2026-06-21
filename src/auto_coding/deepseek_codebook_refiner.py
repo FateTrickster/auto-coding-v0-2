@@ -49,10 +49,11 @@ def run_deepseek_refine(project_dir: str | Path, round_id: str = "round_01",
 
     all_adj = _jl(adj_path)
     excluded = sum(1 for r in all_adj if r.get("unresolved"))
-    adj = [r for r in all_adj if not r.get("unresolved")] if exclude_unresolved else all_adj
+    # Refiner uses resolved adjudications (excludes unresolved by default)
+    eligible = [r for r in all_adj if not r.get("unresolved")] if exclude_unresolved else all_adj
 
     if mode == "mock":
-        changes = _mock_refine(adj, round_id, codebook_version)
+        changes = _mock_refine(eligible, round_id, codebook_version)
     else:
         from .deepseek_client import DeepSeekClient
         import yaml
@@ -61,18 +62,27 @@ def run_deepseek_refine(project_dir: str | Path, round_id: str = "round_01",
         if not cb_path.exists() and codebook_version == "v1.0":
             cb_path = root / "01_codebook" / "final_codebook_v1.0.yaml"
         codebook = yaml.safe_load(cb_path.read_text(encoding="utf-8"))
-        changes = _deepseek_refine(adj, client, codebook, round_id, codebook_version)
+        changes = _deepseek_refine(eligible, client, codebook, round_id, codebook_version)
 
     proposal = {
         "round_id": round_id,
         "source_codebook_version": codebook_version,
-        "target_codebook_version": f"v{int(codebook_version.replace('v','').split('.')[0])+0.1}_candidate",
+        "target_codebook_version": _next_candidate_version(codebook_version),
         "changes": changes,
     }
     with open(rd / f"codebook_revision_proposal_{round_id}.json", "w", encoding="utf-8") as f:
         json.dump(proposal, f, ensure_ascii=False, indent=2)
 
     return {"changes_count": len(changes), "excluded_unresolved": excluded}
+
+
+def _next_candidate_version(version: str) -> str:
+    """v0.1 → v0.2_candidate, v0.9 → v0.10_candidate, v1.0 → v1.1_candidate, etc."""
+    v = version.replace("_candidate", "").lstrip("v")
+    parts = v.split(".")
+    major = int(parts[0])
+    minor = int(parts[1]) if len(parts) > 1 else 0
+    return f"v{major}.{minor + 1}_candidate"
 
 
 def _mock_refine(adj, round_id, cv):
@@ -88,13 +98,17 @@ def _mock_refine(adj, round_id, cv):
     return changes
 
 
-def _deepseek_refine(adj, client, codebook, round_id, cv):
-    unresolved = [r for r in adj if r.get("unresolved")]
-    if not unresolved: return []
+def _deepseek_refine(eligible, client, codebook, round_id, cv):
+    """Refine codebook based on resolved adjudication evidence."""
+    if not eligible: return []
+    candidates = [r for r in eligible
+                  if r.get("codebook_change_needed") or
+                  r.get("coder_A_label") != r.get("coder_B_label")]
+    if not candidates: return []
     try:
         resp = client.chat_json("Propose codebook changes.", json.dumps({
-            "task": "propose_changes", "unresolved_count": len(unresolved),
-            "samples": unresolved[:5],
+            "task": "propose_changes", "candidate_count": len(candidates),
+            "samples": candidates[:5],
         }, ensure_ascii=False), max_tokens=1000)
         llm_changes = resp.get("changes", [])
         result = []
@@ -108,7 +122,7 @@ def _deepseek_refine(adj, client, codebook, round_id, cv):
                 llm.get("requires_recoding", False), [], [], round_id, cv))
         return result
     except Exception:
-        return _mock_refine(adj, round_id, cv)
+        return _mock_refine(eligible, round_id, cv)
 
 
 def _build_change(ci, change_type, target_codes, reason, proposed_text,
@@ -125,7 +139,7 @@ def _build_change(ci, change_type, target_codes, reason, proposed_text,
         "change_id": f"C{ci:04d}",
         "round_id": round_id,
         "source_codebook_version": source_cv,
-        "target_codebook_version": f"v{int(source_cv.replace('v','').split('.')[0])+0.1}_candidate",
+        "target_codebook_version": _next_candidate_version(source_cv),
         "evidence_decisions": evidence_decisions,
         "risk": "low",
         "affected_patterns": affected_patterns,
