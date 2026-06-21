@@ -551,6 +551,7 @@ def sample(
     # ── Load config ─────────────────────────────────────────
     config = _load_risk_config(Path(risk_config_path) if risk_config_path else None)
     is_round01 = (round_id == "round_01")
+    risk_config_provided = risk_config_path is not None
     explicit_units = config.get("explicit_units", [])
 
     # ── Load & validate ─────────────────────────────────────
@@ -565,7 +566,7 @@ def sample(
         coverage = _analyze_sample_coverage(valid_rows, valid_rows, target_size)
         return _build_output(
             valid_rows, out_dir, target_size, input_count, seed,
-            config, None, is_round01, coverage, original_fieldnames, round_id, False,
+            config, None, is_round01, coverage, original_fieldnames, round_id, risk_config_provided,
         )
 
     # ── Pool targets ────────────────────────────────────────
@@ -664,7 +665,7 @@ def sample(
     return _build_output(
         final_selected, out_dir, target_size, input_count, seed,
         config, resolved_control, is_round01, coverage, original_fieldnames, round_id,
-        risk_config_path is not None,
+        risk_config_provided,
     )
 
 
@@ -708,7 +709,7 @@ def _write_sample_report(selected, out_dir, input_count, target_size, seed,
         f"- Round ID: {round_id}",
         f"- 随机种子: {seed}",
         f"- 全量选取: {'是' if input_count <= target_size else '否'}",
-        f"- Round 模式: {'Round 1（代表性抽样 + 结构困难覆盖）' if is_round01 else 'Round 2+（含风险画像）'}",
+        f"- Round 模式: {'Round 1 (representative + structural difficulty)' if is_round01 else 'Round 2+'}",
         f"- Risk profile used: {'yes' if risk_config_provided else 'no'}",
         "",
     ]
@@ -791,8 +792,8 @@ def _write_sample_report(selected, out_dir, input_count, target_size, seed,
 
     lines += [
         "", f"## {section_base + 2}. 文本长度统计",
-        f"- 短文本（≤10 字）: {short_count}",
-        f"- 长文本（≥100 字）: {long_count}",
+        f"- 短文本（≤{SHORT_TEXT_MAX_CHARS} 字）: {short_count}",
+        f"- 长文本（≥{LONG_TEXT_MIN_CHARS} 字）: {long_count}",
     ]
     report_path.write_text("\n".join(lines), encoding="utf-8")
     return report_path

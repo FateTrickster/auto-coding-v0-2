@@ -569,3 +569,53 @@ class TestRoundId:
             assert r["risk_config_used"] is False
             report = Path(r["report_path"]).read_text(encoding="utf-8")
             assert "Round 1" in report
+
+    def test_report_uses_3_120_thresholds(self):
+        rows = [_make_unit(f"u{i}", text=f"text{i}") for i in range(50)]
+        with tempfile.TemporaryDirectory() as d:
+            upath = Path(d) / "unit_table.csv"
+            _write_csv(upath, rows)
+            r = sample(upath, Path(d) / "out", target_size=20, seed=42, round_id="round_01")
+            report = Path(r["report_path"]).read_text(encoding="utf-8")
+            assert f"≤{3} 字" in report or "3 字" in report
+            assert f"≥{120} 字" in report or "120 字" in report
+            assert "≤10 字" not in report
+            assert "≥100 字" not in report
+
+    def test_full_population_preserves_risk_config(self):
+        """When input ≤ target, risk config status must still be correct."""
+        rows = [_make_unit(f"u{i}", text=f"text{i}") for i in range(5)]
+        config = {"explicit_units": [{"unit_id": "u3", "risk_type": "test", "source": "test",
+                    "evidence_ids": ["D1"]}]}
+        with tempfile.TemporaryDirectory() as d:
+            upath = Path(d) / "unit_table.csv"
+            cpath = Path(d) / "cfg.yaml"
+            _write_csv(upath, rows)
+            _write_yaml(cpath, config)
+            r = sample(upath, Path(d) / "out", target_size=100, seed=42,
+                       risk_config_path=cpath, round_id="round_02")
+            assert r["risk_config_used"] is True
+            assert r["round_id"] == "round_02"
+            report = Path(r["report_path"]).read_text(encoding="utf-8")
+            assert "Risk profile used: yes" in report
+
+    def test_round02_without_config_does_not_claim_risk_profile(self):
+        rows = [_make_unit(f"u{i}", text=f"text{i}") for i in range(50)]
+        with tempfile.TemporaryDirectory() as d:
+            upath = Path(d) / "unit_table.csv"
+            _write_csv(upath, rows)
+            r = sample(upath, Path(d) / "out", target_size=20, seed=42, round_id="round_02")
+            report = Path(r["report_path"]).read_text(encoding="utf-8")
+            assert "含风险画像" not in report
+
+    def test_report_risk_profile_matches_return(self):
+        rows = [_make_unit(f"u{i}", text=f"text{i}") for i in range(50)]
+        with tempfile.TemporaryDirectory() as d:
+            upath = Path(d) / "unit_table.csv"
+            _write_csv(upath, rows)
+            r = sample(upath, Path(d) / "out", target_size=20, seed=42, round_id="round_01")
+            report = Path(r["report_path"]).read_text(encoding="utf-8")
+            if r["risk_config_used"]:
+                assert "Risk profile used: yes" in report
+            else:
+                assert "Risk profile used: no" in report
