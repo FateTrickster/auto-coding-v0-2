@@ -171,7 +171,7 @@ class TestRound02PlusExplicitUnits:
             _write_csv(upath, rows)
             _write_yaml(cpath, config)
             r = sample(upath, Path(d) / "out", target_size=50, seed=42,
-                       risk_config_path=cpath)
+                       risk_config_path=cpath, round_id="round_02")
 
             assert r["risk_config_used"] is True
             with open(Path(r["output_path"]), encoding="utf-8-sig") as f:
@@ -516,3 +516,56 @@ class TestFieldPreservation:
                 sampled = list(csv.DictReader(f))
             assert len(sampled) == 30
             assert len(sampled) < 100
+
+
+class TestRoundId:
+    def test_round_id_in_return(self):
+        rows = [_make_unit(f"u{i}", text=f"text{i}") for i in range(50)]
+        with tempfile.TemporaryDirectory() as d:
+            upath = Path(d) / "unit_table.csv"
+            _write_csv(upath, rows)
+            r = sample(upath, Path(d) / "out", target_size=20, seed=42, round_id="round_02")
+            assert r["round_id"] == "round_02"
+
+    def test_round_id_in_report(self):
+        rows = [_make_unit(f"u{i}", text=f"text{i}") for i in range(50)]
+        with tempfile.TemporaryDirectory() as d:
+            upath = Path(d) / "unit_table.csv"
+            _write_csv(upath, rows)
+            r = sample(upath, Path(d) / "out", target_size=20, seed=42, round_id="round_02")
+            report = Path(r["report_path"]).read_text(encoding="utf-8")
+            assert "Round ID: round_02" in report
+
+    def test_round02_without_risk_config(self):
+        rows = [_make_unit(f"u{i}", text=f"text{i}") for i in range(50)]
+        with tempfile.TemporaryDirectory() as d:
+            upath = Path(d) / "unit_table.csv"
+            _write_csv(upath, rows)
+            r = sample(upath, Path(d) / "out", target_size=20, seed=42, round_id="round_02")
+            assert r["round_id"] == "round_02"
+            assert r["risk_config_used"] is False
+
+    def test_round02_with_risk_config(self):
+        rows = [_make_unit(f"u{i}", text=f"text{i}") for i in range(100)]
+        config = {"explicit_units": [{"unit_id": "u50", "risk_type": "test", "source": "test",
+                    "evidence_ids": ["D0001"]}]}
+        with tempfile.TemporaryDirectory() as d:
+            upath = Path(d) / "unit_table.csv"
+            cpath = Path(d) / "risk_config.yaml"
+            _write_csv(upath, rows)
+            _write_yaml(cpath, config)
+            r = sample(upath, Path(d) / "out", target_size=30, seed=42,
+                       risk_config_path=cpath, round_id="round_02")
+            assert r["round_id"] == "round_02"
+            assert r["risk_config_used"] is True
+
+    def test_round_identity_independent_of_config(self):
+        rows = [_make_unit(f"u{i}", text=f"text{i}") for i in range(50)]
+        with tempfile.TemporaryDirectory() as d:
+            upath = Path(d) / "unit_table.csv"
+            _write_csv(upath, rows)
+            r = sample(upath, Path(d) / "out", target_size=20, seed=42, round_id="round_01")
+            assert r["round_id"] == "round_01"
+            assert r["risk_config_used"] is False
+            report = Path(r["report_path"]).read_text(encoding="utf-8")
+            assert "Round 1" in report

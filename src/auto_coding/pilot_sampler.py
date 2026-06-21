@@ -550,7 +550,7 @@ def sample(
 
     # ── Load config ─────────────────────────────────────────
     config = _load_risk_config(Path(risk_config_path) if risk_config_path else None)
-    is_round01 = config.get("_is_round01", True)
+    is_round01 = (round_id == "round_01")
     explicit_units = config.get("explicit_units", [])
 
     # ── Load & validate ─────────────────────────────────────
@@ -565,7 +565,7 @@ def sample(
         coverage = _analyze_sample_coverage(valid_rows, valid_rows, target_size)
         return _build_output(
             valid_rows, out_dir, target_size, input_count, seed,
-            config, None, is_round01, coverage, original_fieldnames, round_id,
+            config, None, is_round01, coverage, original_fieldnames, round_id, False,
         )
 
     # ── Pool targets ────────────────────────────────────────
@@ -664,6 +664,7 @@ def sample(
     return _build_output(
         final_selected, out_dir, target_size, input_count, seed,
         config, resolved_control, is_round01, coverage, original_fieldnames, round_id,
+        risk_config_path is not None,
     )
 
 
@@ -688,14 +689,15 @@ def _write_sample_csv(selected, out_dir, original_fieldnames):
 
 
 def _write_sample_report(selected, out_dir, input_count, target_size, seed,
-                          config, resolved_control, is_round01, coverage):
+                          config, resolved_control, is_round01, coverage, round_id,
+                          risk_config_provided=False):
     report_path = out_dir / "pilot_sample_build_report.md"
     rc = Counter(r.get("_sample_reason", "") for r in selected)
     sc = len(selected)
     exc = rc.get("explicit_unit", 0)
     ctrl_count = rc.get("control_group", 0)
-    short_count = sum(1 for r in selected if _char_len(r.get("unit_text", "")) <= 10)
-    long_count = sum(1 for r in selected if _char_len(r.get("unit_text", "")) >= 100)
+    short_count = sum(1 for r in selected if _char_len(r.get("unit_text", "")) <= SHORT_TEXT_MAX_CHARS)
+    long_count = sum(1 for r in selected if _char_len(r.get("unit_text", "")) >= LONG_TEXT_MIN_CHARS)
 
     lines = [
         "# Pilot Sample Build Report", "",
@@ -703,9 +705,11 @@ def _write_sample_report(selected, out_dir, input_count, target_size, seed,
         f"- 输入有效记录数: {input_count}",
         f"- 目标样本数: {target_size}",
         f"- 实际抽样数: {sc}",
+        f"- Round ID: {round_id}",
         f"- 随机种子: {seed}",
         f"- 全量选取: {'是' if input_count <= target_size else '否'}",
         f"- Round 模式: {'Round 1（代表性抽样 + 结构困难覆盖）' if is_round01 else 'Round 2+（含风险画像）'}",
+        f"- Risk profile used: {'yes' if risk_config_provided else 'no'}",
         "",
     ]
     if not is_round01:
@@ -806,12 +810,13 @@ def _build_output(
     coverage: dict,
     original_fieldnames: list[str],
     round_id: str = "round_01",
+    risk_config_provided: bool = False,
 ) -> dict[str, Any]:
     out_dir.mkdir(parents=True, exist_ok=True)
     csv_path = _write_sample_csv(selected, out_dir, original_fieldnames)
     report_path = _write_sample_report(
         selected, out_dir, input_count, target_size, seed, config,
-        resolved_control, is_round01, coverage,
+        resolved_control, is_round01, coverage, round_id, risk_config_provided,
     )
     rc = Counter(r.get("_sample_reason", "") for r in selected)
     return {
@@ -822,7 +827,7 @@ def _build_output(
         "speakers_covered": len(set(_norm_group(r.get("speaker_id")) for r in selected)),
         "high_risk_count": 0,
         "control_group_count": rc.get("control_group", 0),
-        "risk_config_used": not is_round01,
+        "risk_config_used": risk_config_provided,
         "control_group": resolved_control,
         "output_path": str(csv_path),
         "report_path": str(report_path),
