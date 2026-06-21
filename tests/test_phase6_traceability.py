@@ -16,13 +16,13 @@ def _setup(d: Path):
     with open(d / "04_pilot" / "pilot_sample_units.csv", "w", encoding="utf-8", newline="") as f:
         w = csv.DictWriter(f, fieldnames=["unit_id","unit_text","context_before","context_after","group_id","speaker_id"])
         w.writeheader(); w.writerows(rows)
-    cb = {"version": "v0.2_candidate", "codes": [
+    cb = {"version": "v0.1", "codes": [
         make_valid_code("IS1"),
         make_valid_code("IS2"),
         make_valid_code("IS3"),
         make_valid_code("IS4"),
     ]}
-    with open(d / "01_codebook" / "codebook_v0.2_candidate.yaml", "w", encoding="utf-8") as f:
+    with open(d / "01_codebook" / "codebook_v0.1.yaml", "w", encoding="utf-8") as f:
         yaml.dump(cb, f, allow_unicode=True)
 
 
@@ -31,15 +31,15 @@ class TestTraceability:
         with tempfile.TemporaryDirectory() as d:
             b = Path(d); _setup(b)
             runner = SelfLoopRunner(b)
-            runner.run_round("round_01", "v0.2_candidate")
+            runner.run_round("round_01", "v0.1")
             audit = (b / "04_pilot" / "round_01" / "round_audit_log.md").read_text(encoding="utf-8")
-            assert "v0.2_candidate" in audit
+            assert "v0.1" in audit
 
     def test_self_loop_state_records_current_cv(self):
         with tempfile.TemporaryDirectory() as d:
             b = Path(d); _setup(b)
             runner = SelfLoopRunner(b)
-            runner.run_loop("round_01", "v0.2_candidate")
+            runner.run_loop("round_01", "v0.1")
             with open(b / "99_logs" / "self_loop_state.json", encoding="utf-8") as f:
                 state = json.load(f)
             assert "current_codebook_version" in state
@@ -48,6 +48,6 @@ class TestTraceability:
         with tempfile.TemporaryDirectory() as d:
             b = Path(d); _setup(b)
             runner = SelfLoopRunner(b)
-            runner.run_loop("round_01", "v0.2_candidate")
+            runner.run_loop("round_01", "v0.1")
             audit = (b / "99_logs" / "self_loop_audit_log.md").read_text(encoding="utf-8")
             assert "round_01" in audit

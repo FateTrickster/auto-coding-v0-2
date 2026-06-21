@@ -28,7 +28,7 @@ def init_from_codebook_cli(
             shutil.copy2(src, inputs_dir / dst)
     if config and Path(config).exists():
         shutil.copy2(config, inputs_dir / "project_config.yaml")
-    for sub in ["01_codebook", "02_prompts", "03_units", "04_pilot", "03_training"]:
+    for sub in ["01_codebook", "02_prompts", "03_units", "04_pilot"]:
         ensure_dir(proj / sub)
     print(f"Project initialized: {proj}")
 
@@ -119,36 +119,13 @@ def build_risk_profile_cli(
 
 # ── Phase 2 command ───────────────────────────────────────
 
-@app.command("train-coders")
-def train_coders_cli(
-    project_dir: str = typer.Option(..., help="Project directory"),
-    codebook_version: str = typer.Option("v0.1"),
-    round_id: str = typer.Option("round01"),
-    mode: str = typer.Option("mock"),
-    max_items: int = typer.Option(30),
-):
-    """Run coder training phase (mock/rule-based)."""
-    from .coder_training import CoderTrainingAgent
-
-    agent = CoderTrainingAgent(mode=mode, max_items=max_items)
-    result = agent.run(
-        project_dir=project_dir,
-        codebook_version=codebook_version,
-        round_id=round_id,
-        max_items=max_items,
-    )
-    print(f"Training complete: {result['training_samples']} samples, "
-          f"{result['issues']} issues, {result['suggestions']} suggestions, "
-          f"candidate={'YES' if result['candidate_generated'] else 'NO'}")
-
-
 # ── Phase 3 commands ───────────────────────────────────────
 
 @app.command("pilot-code")
 def pilot_code_cli(
     project_dir: str = typer.Option(..., help="Project directory"),
     round_id: str = typer.Option("round_01"),
-    codebook_version: str = typer.Option("v0.2_candidate"),
+    codebook_version: str = typer.Option("v0.1"),
     mode: str = typer.Option("mock"),
 ):
     """Run independent pilot coding (Coder A + Coder B)."""
@@ -196,7 +173,7 @@ def analyze_disagreements_cli(
 def adjudicate_cli(
     project_dir: str = typer.Option(..., help="Project directory"),
     round_id: str = typer.Option("round_01"),
-    codebook_version: str = typer.Option("v0.2_candidate"),
+    codebook_version: str = typer.Option("v0.1"),
     mode: str = typer.Option("mock"),
 ):
     """Adjudicate disagreements + generate decision log + consensus labels."""
@@ -259,7 +236,7 @@ def decide_round_cli(
 def self_loop_round_cli(
     project_dir: str = typer.Option(..., help="Project directory"),
     round_id: str = typer.Option("round_01"),
-    codebook_version: str = typer.Option("v0.2_candidate"),
+    codebook_version: str = typer.Option("v0.1"),
     mode: str = typer.Option("mock"),
     kappa_threshold: float = typer.Option(0.75),
 ):
@@ -274,7 +251,7 @@ def self_loop_round_cli(
 def self_loop_cli(
     project_dir: str = typer.Option(..., help="Project directory"),
     start_round_id: str = typer.Option("round_01"),
-    initial_codebook_version: str = typer.Option("v0.2_candidate"),
+    initial_codebook_version: str = typer.Option("v0.1"),
     max_rounds: int = typer.Option(5),
     kappa_threshold: float = typer.Option(0.75),
     mode: str = typer.Option("mock"),

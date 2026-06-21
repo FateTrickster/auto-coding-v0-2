@@ -19,14 +19,14 @@ def _setup_project(d: Path) -> None:
         w = csv.DictWriter(f, fieldnames=["unit_id", "unit_text", "context_before",
                                           "context_after", "group_id", "speaker_id"])
         w.writeheader(); w.writerows(rows)
-    # Minimal codebook
-    cb = {"version": "v0.2_candidate", "codes": [
+    # Minimal codebook (v0.1 — the initial version)
+    cb = {"version": "v0.1", "codes": [
         make_valid_code("IS1"),
         make_valid_code("IS2"),
         make_valid_code("IS3"),
         make_valid_code("IS4"),
     ]}
-    with open(d / "01_codebook" / "codebook_v0.2_candidate.yaml", "w", encoding="utf-8") as f:
+    with open(d / "01_codebook" / "codebook_v0.1.yaml", "w", encoding="utf-8") as f:
         yaml.dump(cb, f, allow_unicode=True)
 
 
@@ -38,6 +38,7 @@ class TestNextRoundId:
 
 class TestNextCodebookVersion:
     def test_increments(self):
+        assert "v0.2" in _next_codebook_version("v0.1")
         assert "v0.3" in _next_codebook_version("v0.2_candidate")
         assert "v0.4" in _next_codebook_version("v0.3_candidate")
 
@@ -47,7 +48,7 @@ class TestSelfLoopRunner:
         with tempfile.TemporaryDirectory() as d:
             b = Path(d); _setup_project(b)
             runner = SelfLoopRunner(b, mode="mock")
-            r = runner.run_round("round_01", "v0.2_candidate")
+            r = runner.run_round("round_01", "v0.1")
             assert r["kappa"] is not None
             assert r["round_id"] == "round_01"
             rd = b / "04_pilot" / "round_01"
@@ -59,7 +60,7 @@ class TestSelfLoopRunner:
         with tempfile.TemporaryDirectory() as d:
             b = Path(d); _setup_project(b)
             runner = SelfLoopRunner(b, mode="mock", max_rounds=3)
-            state = runner.run_loop("round_01", "v0.2_candidate")
+            state = runner.run_loop("round_01", "v0.1")
             assert len(state["rounds_completed"]) >= 1
             assert state["stopped"] is True
             # Verify state file
@@ -73,8 +74,8 @@ class TestSelfLoopRunner:
         with tempfile.TemporaryDirectory() as d:
             b = Path(d); _setup_project(b)
             runner = SelfLoopRunner(b, mode="mock")
-            runner.run_round("round_01", "v0.2_candidate")
-            runner.run_loop("round_01", "v0.2_candidate")
+            runner.run_round("round_01", "v0.1")
+            runner.run_loop("round_01", "v0.1")
             with open(b / "99_logs" / "self_loop_state.json", encoding="utf-8") as f:
                 state = json.load(f)
             assert "rounds_completed" in state
@@ -85,9 +86,9 @@ class TestSelfLoopRunner:
         with tempfile.TemporaryDirectory() as d:
             b = Path(d); _setup_project(b)
             runner = SelfLoopRunner(b, mode="mock")
-            runner.run_round("round_01", "v0.2_candidate")
+            runner.run_round("round_01", "v0.1")
             # Create round_02 input via auto-loop
-            runner.run_loop("round_01", "v0.2_candidate")
+            runner.run_loop("round_01", "v0.1")
             # Check round_02 directory
             rd2 = b / "04_pilot" / "round_02"
             # May or may not exist depending on decision

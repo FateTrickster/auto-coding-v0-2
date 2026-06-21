@@ -27,7 +27,7 @@ def _sf(v) -> float:
 
 
 def adjudicate(project_dir: str | Path, round_id: str = "round_01",
-               codebook_version: str = "v0.2_candidate") -> dict:
+               codebook_version: str = "v0.1") -> dict:
     project_dir = Path(project_dir)
     rd = project_dir / "04_pilot" / round_id
 

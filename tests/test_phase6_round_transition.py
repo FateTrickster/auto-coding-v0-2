@@ -18,13 +18,13 @@ def _setup(d: Path):
     with open(d / "04_pilot" / "pilot_sample_units.csv", "w", encoding="utf-8", newline="") as f:
         w = csv.DictWriter(f, fieldnames=["unit_id","unit_text","context_before","context_after","group_id","speaker_id"])
         w.writeheader(); w.writerows(rows)
-    cb = {"version": "v0.2_candidate", "codes": [
+    cb = {"version": "v0.1", "codes": [
         make_valid_code("IS1"),
         make_valid_code("IS2"),
         make_valid_code("IS3"),
         make_valid_code("IS4"),
     ]}
-    with open(d / "01_codebook" / "codebook_v0.2_candidate.yaml", "w", encoding="utf-8") as f:
+    with open(d / "01_codebook" / "codebook_v0.1.yaml", "w", encoding="utf-8") as f:
         yaml.dump(cb, f, allow_unicode=True)
 
 
@@ -33,24 +33,24 @@ class TestRoundTransition:
         with tempfile.TemporaryDirectory() as d:
             b = Path(d); _setup(b)
             runner = SelfLoopRunner(b)
-            r = runner.run_round("round_01", "v0.2_candidate")
+            r = runner.run_round("round_01", "v0.1")
             assert "decision" in r
             assert "next_action" in r
 
-    def test_round_02_uses_v03_codebook(self):
+    def test_round_02_uses_v02_candidate_codebook(self):
         with tempfile.TemporaryDirectory() as d:
             b = Path(d); _setup(b)
             runner = SelfLoopRunner(b)
-            r = runner.run_round("round_01", "v0.2_candidate")
+            r = runner.run_round("round_01", "v0.1")
             if r["next_action"] in ("run_round_02",):
                 r2 = runner.run_round("round_02", r["target_codebook_version"])
-                assert "v0.3" in r2["codebook_version"]
+                assert "v0.2" in r2["codebook_version"]
 
     def test_carryover_enters_next_round(self):
         with tempfile.TemporaryDirectory() as d:
             b = Path(d); _setup(b)
             runner = SelfLoopRunner(b)
-            r = runner.run_round("round_01", "v0.2_candidate")
+            r = runner.run_round("round_01", "v0.1")
             carryover = r.get("carryover", [])
             if carryover and r["next_action"] in ("run_round_02",):
                 runner._prepare_next_round_input("round_02", r)

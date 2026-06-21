@@ -248,8 +248,6 @@ def _build_report(result: dict, root: Path) -> str:
         "python -m auto_coding.cli review-codebook --project-dir outputs/agentic_coding_project",
         "python -m auto_coding.cli render-prompt --project-dir outputs/agentic_coding_project",
         "python -m auto_coding.cli validate-units --project-dir outputs/agentic_coding_project",
-        "# Phase 2",
-        "python -m auto_coding.cli train-coders --project-dir outputs/agentic_coding_project",
         "# Phase 3-6 (self-loop: round_01 → round_02 → round_03)",
         "python -m auto_coding.cli self-loop --project-dir outputs/agentic_coding_project --max-rounds 3",
         "# Phase 7 (forced freeze due to stop_max_rounds)",

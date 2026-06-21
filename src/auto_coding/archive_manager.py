@@ -12,7 +12,7 @@ def archive(project_dir: str | Path) -> dict:
     out = project_dir / "99_logs"
     out.mkdir(parents=True, exist_ok=True)
 
-    key_dirs = ["00_inputs", "01_codebook", "02_prompts", "03_training",
+    key_dirs = ["00_inputs", "01_codebook", "02_prompts",
                 "04_pilot", "06_formal_coding", "07_final", "99_logs"]
     manifest = {"archive_time": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
                 "project_dir": str(project_dir), "files": []}

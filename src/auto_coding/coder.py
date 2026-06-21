@@ -137,7 +137,7 @@ def _error_result(unit_id: str, coder_id: str, version: str, error: str) -> dict
 def run_pilot_coding(
     project_dir: str | Path,
     round_id: str = "round_01",
-    codebook_version: str = "v0.2_candidate",
+    codebook_version: str = "v0.1",
     mode: str = "mock",
     seed: int = 42,
 ) -> dict:

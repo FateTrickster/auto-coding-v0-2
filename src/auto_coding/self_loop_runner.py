@@ -36,7 +36,7 @@ class SelfLoopRunner:
     # ── Run single round ─────────────────────────────────
 
     def run_round(self, round_id: str = "round_01",
-                  codebook_version: str = "v0.2_candidate") -> dict:
+                  codebook_version: str = "v0.1") -> dict:
         """Run all Phase 3-5 steps for a single pilot round."""
         rd = self.project_dir / "04_pilot" / round_id
         rd.mkdir(parents=True, exist_ok=True)
@@ -119,7 +119,7 @@ class SelfLoopRunner:
     # ── Run auto-loop ────────────────────────────────────
 
     def run_loop(self, start_round_id: str = "round_01",
-                 initial_codebook_version: str = "v0.2_candidate") -> dict:
+                 initial_codebook_version: str = "v0.1") -> dict:
         """Run self-loop: iterate rounds until stop condition."""
         self.audit_lines = [
             f"# Self-Loop Audit Log — {_ts()}", "",
@@ -257,6 +257,8 @@ def _next_round_id(current: str) -> str:
 
 
 def _next_codebook_version(current: str) -> str:
+    if current == "v0.1":
+        return "v0.2_candidate"
     if "v0.2" in current:
         return "v0.3_candidate"
     if "v0.3" in current:
