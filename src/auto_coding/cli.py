@@ -117,6 +117,7 @@ def sample_pilot_cli(
         seed=seed,
         risk_config_path=rc,
         control_group=control_group,
+        round_id=round_id,
     )
     print(f"Sampled {r['sampled_count']} units, groups={r['groups_covered']}, "
           f"risk_config={'YES' if r['risk_config_used'] else 'NO'}")

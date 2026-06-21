@@ -33,11 +33,15 @@ def validate(unit_table_path: str | Path, out_dir: str | Path) -> dict:
         )
     if not available_fields or all(not h.strip() for h in available_fields):
         raise ValueError(f"Empty or invalid header in {unit_table_path}")
+    if not rows:
+        raise ValueError(
+            f"Unit table contains a valid header but no data rows: {unit_table_path}"
+        )
 
     out_dir = Path(out_dir)
     out_dir.mkdir(parents=True, exist_ok=True)
 
-    fieldnames = list(rows[0].keys()) if rows else []
+    fieldnames = list(available_fields)
     enhanced_fieldnames = fieldnames + [
         "short_text_flag", "long_text_flag", "missing_context_flag",
         "possible_multi_function_flag", "validation_note",

@@ -523,6 +523,7 @@ def sample(
     seed: int = 42,
     risk_config_path: str | Path | None = None,
     control_group: str | None = None,
+    round_id: str = "round_01",
 ) -> dict[str, Any]:
     """Stratified sampling from unit_table_v0.1.csv.
 
@@ -564,7 +565,7 @@ def sample(
         coverage = _analyze_sample_coverage(valid_rows, valid_rows, target_size)
         return _build_output(
             valid_rows, out_dir, target_size, input_count, seed,
-            config, None, is_round01, coverage, original_fieldnames,
+            config, None, is_round01, coverage, original_fieldnames, round_id,
         )
 
     # ── Pool targets ────────────────────────────────────────
@@ -662,7 +663,7 @@ def sample(
     coverage = _analyze_sample_coverage(valid_rows, final_selected, target_size)
     return _build_output(
         final_selected, out_dir, target_size, input_count, seed,
-        config, resolved_control, is_round01, coverage, original_fieldnames,
+        config, resolved_control, is_round01, coverage, original_fieldnames, round_id,
     )
 
 
@@ -804,6 +805,7 @@ def _build_output(
     is_round01: bool,
     coverage: dict,
     original_fieldnames: list[str],
+    round_id: str = "round_01",
 ) -> dict[str, Any]:
     out_dir.mkdir(parents=True, exist_ok=True)
     csv_path = _write_sample_csv(selected, out_dir, original_fieldnames)
@@ -827,4 +829,5 @@ def _build_output(
         "coverage": coverage,
         "needs_resampling": coverage.get("needs_resampling", False),
         "coverage_warnings": coverage.get("warnings", []),
+        "round_id": round_id,
     }
