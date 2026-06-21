@@ -13,12 +13,13 @@ def _write_csv(path, rows, fields=None):
         w.writerows(rows)
 
 
-def _make_unit(uid, group="g01", speaker="s1", text="test", **kw):
+def _make_unit(uid, group="g01", speaker="s1", text="test", risk_flags="", **kw):
     d = {
         "unit_id": uid,
         "group_id": group,
         "speaker_id": speaker,
         "unit_text": text,
+        "risk_flags": risk_flags,
     }
     d.update(kw)
     return d
@@ -140,7 +141,8 @@ class TestRound01NoBoundary:
             assert r["sampled_count"] == 20
             with open(Path(r["output_path"]), encoding="utf-8-sig") as f:
                 sampled = list(csv.DictReader(f))
-            assert all(row["risk_flags"] == "" for row in sampled)
+            # risk_flags not in input → not in output (field preservation behavior)
+            assert "risk_flags" not in sampled[0]
 
 
 class TestRound02PlusExplicitUnits:
@@ -437,3 +439,80 @@ class TestCoverageAnalysis:
             assert "coverage" in r
             assert "needs_resampling" in r
             assert "coverage_warnings" in r
+
+
+class TestFieldPreservation:
+    def test_all_original_fields_preserved(self):
+        """CSV output must preserve ALL original fields, not just 6."""
+        fields = ["unit_id", "group_id", "speaker_id", "unit_text",
+                  "turn_id", "context_before", "context_after",
+                  "source_row_id", "extra_custom_field"]
+        rows = []
+        for i in range(50):
+            rows.append({
+                "unit_id": f"u{i:03d}", "group_id": "g01", "speaker_id": "s1",
+                "unit_text": f"text{i}", "turn_id": f"t{i}", "context_before": f"cb{i}",
+                "context_after": f"ca{i}", "source_row_id": str(i + 10),
+                "extra_custom_field": f"extra_{i}",
+            })
+        with tempfile.TemporaryDirectory() as d:
+            upath = Path(d) / "unit_table.csv"
+            _write_csv(upath, rows, fields=fields)
+            r = sample(upath, Path(d) / "out", target_size=20, seed=42)
+            with open(Path(r["output_path"]), encoding="utf-8-sig") as f:
+                sampled = list(csv.DictReader(f))
+            csv_fields = list(sampled[0].keys())
+            for fld in ["turn_id", "context_before", "context_after",
+                        "source_row_id", "extra_custom_field"]:
+                assert fld in csv_fields, f"Missing field: {fld}"
+            assert "sample_reason" in csv_fields
+
+    def test_field_values_match_original(self):
+        """Preserved fields retain original values from unit_table."""
+        fields = ["unit_id", "group_id", "speaker_id", "unit_text",
+                  "context_before", "context_after"]
+        rows = []
+        for i in range(100):
+            rows.append({
+                "unit_id": f"u{i:03d}", "group_id": "g01", "speaker_id": "s1",
+                "unit_text": f"text{i}", "context_before": f"ctx_before_{i}",
+                "context_after": f"ctx_after_{i}",
+            })
+        with tempfile.TemporaryDirectory() as d:
+            upath = Path(d) / "unit_table.csv"
+            _write_csv(upath, rows, fields=fields)
+            r = sample(upath, Path(d) / "out", target_size=30, seed=42)
+            with open(Path(r["output_path"]), encoding="utf-8-sig") as f:
+                sampled = list(csv.DictReader(f))
+            orig_by_id = {r["unit_id"]: r for r in rows}
+            for srow in sampled:
+                uid = srow["unit_id"]
+                orig = orig_by_id[uid]
+                assert srow["context_before"] == orig["context_before"], f"context mismatch for {uid}"
+                assert srow["context_after"] == orig["context_after"], f"context mismatch for {uid}"
+                assert srow["unit_text"] == orig["unit_text"], f"text mismatch for {uid}"
+
+    def test_internal_fields_not_in_csv(self):
+        """Internal _fields must NOT appear in CSV output."""
+        rows = [_make_unit(f"u{i}", text=f"text{i}") for i in range(50)]
+        with tempfile.TemporaryDirectory() as d:
+            upath = Path(d) / "unit_table.csv"
+            _write_csv(upath, rows)
+            r = sample(upath, Path(d) / "out", target_size=20, seed=42)
+            with open(Path(r["output_path"]), encoding="utf-8-sig") as f:
+                sampled = list(csv.DictReader(f))
+            csv_fields = list(sampled[0].keys())
+            for fld in csv_fields:
+                assert not fld.startswith("_"), f"Internal field leaked: {fld}"
+
+    def test_csv_only_contains_sampled_rows(self):
+        """CSV must only contain sampled units, not full population."""
+        rows = [_make_unit(f"u{i}", text=f"text{i}") for i in range(100)]
+        with tempfile.TemporaryDirectory() as d:
+            upath = Path(d) / "unit_table.csv"
+            _write_csv(upath, rows)
+            r = sample(upath, Path(d) / "out", target_size=30, seed=42)
+            with open(Path(r["output_path"]), encoding="utf-8-sig") as f:
+                sampled = list(csv.DictReader(f))
+            assert len(sampled) == 30
+            assert len(sampled) < 100

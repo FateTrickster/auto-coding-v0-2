@@ -110,16 +110,17 @@ def _load_risk_config(path: Path | None) -> dict:
 
 # ── Unit table loading ──────────────────────────────────────────
 
-def _load_and_validate(unit_table_path: Path) -> list[dict]:
+def _load_and_validate(unit_table_path: Path) -> tuple[list[dict], list[str]]:
     if not unit_table_path.exists():
         raise FileNotFoundError(f"Unit table not found: {unit_table_path}")
 
     with open(unit_table_path, "r", encoding="utf-8-sig") as f:
         reader = csv.DictReader(f)
         all_rows = list(reader)
+        original_fieldnames = list(reader.fieldnames or [])
 
     required = {"unit_id", "group_id", "speaker_id", "unit_text"}
-    available = set(reader.fieldnames or [])
+    available = set(original_fieldnames)
     missing = required - available
     if missing:
         raise ValueError(f"Missing required fields in {unit_table_path}: {sorted(missing)}")
@@ -140,7 +141,7 @@ def _load_and_validate(unit_table_path: Path) -> list[dict]:
                 valid_rows.append(row)
     if dup_ids:
         raise ValueError(f"Duplicate unit_id(s) found: {sorted(dup_ids)}")
-    return valid_rows
+    return valid_rows, original_fieldnames
 
 
 # ── Pool 1: group_stratified ────────────────────────────────────
@@ -431,7 +432,6 @@ def _analyze_sample_coverage(
     """
     pop_count = len(all_rows)
     samp_count = len(selected_rows)
-    selected_ids = {(r.get("unit_id") or "").strip() for r in selected_rows}
 
     # ── Group coverage ───────────────────────────────────────
     pop_groups = set(_norm_group(r.get("group_id")) for r in all_rows)
@@ -475,9 +475,10 @@ def _analyze_sample_coverage(
             warnings.append(f"结构类型 {name} 存在但样本未覆盖")
             needs_resampling = True
 
-    # Count anomaly (warning only, not blocking)
+    # Count anomaly — internal invariant, triggers resampling
     theoretical_max = min(target_size, pop_count)
     if samp_count < theoretical_max:
+        needs_resampling = True
         warnings.append(
             f"样本数量 ({samp_count}) 少于理论可抽数量 ({theoretical_max})"
         )
@@ -558,7 +559,7 @@ def sample(
     explicit_units = config.get("explicit_units", [])
 
     # ── Load & validate ─────────────────────────────────────
-    valid_rows = _load_and_validate(unit_table_path)
+    valid_rows, original_fieldnames = _load_and_validate(unit_table_path)
     input_count = len(valid_rows)
     rng = random.Random(seed)
 
@@ -569,7 +570,7 @@ def sample(
         coverage = _analyze_sample_coverage(valid_rows, valid_rows, target_size)
         return _build_output(
             valid_rows, out_dir, target_size, input_count, seed,
-            config, None, {}, is_round01, coverage, rng,
+            config, None, {}, is_round01, coverage, original_fieldnames, rng,
         )
 
     # ── Pool targets ────────────────────────────────────────
@@ -667,7 +668,7 @@ def sample(
     coverage = _analyze_sample_coverage(valid_rows, final_selected, target_size)
     return _build_output(
         final_selected, out_dir, target_size, input_count, seed,
-        config, resolved_control, p2_counts, is_round01, coverage, rng,
+        config, resolved_control, p2_counts, is_round01, coverage, original_fieldnames, rng,
     )
 
 
@@ -684,25 +685,29 @@ def _build_output(
     p2_counts: dict[str, int],
     is_round01: bool,
     coverage: dict,
+    original_fieldnames: list[str],
     rng: random.Random,
 ) -> dict[str, Any]:
     out_dir.mkdir(parents=True, exist_ok=True)
 
-    # ── CSV ─────────────────────────────────────────────────
-    csv_fields = ["unit_id", "group_id", "speaker_id", "unit_text", "risk_flags", "sample_reason"]
+    # ── CSV: preserve ALL original fields + append sample_reason ────
     csv_path = out_dir / "pilot_sample_units.csv"
+    # Build field list: original fields (minus any prior sample_reason) + sample_reason
+    csv_fields = [f for f in original_fieldnames if f != "sample_reason"]
+    if "sample_reason" not in csv_fields:
+        csv_fields.append("sample_reason")
+
     with open(csv_path, "w", encoding="utf-8-sig", newline="") as f:
         writer = csv.DictWriter(f, fieldnames=csv_fields, extrasaction="ignore")
         writer.writeheader()
         for row in selected:
+            # Preserve all original fields, strip str values, add sample_reason
             out_row = {
-                "unit_id": (row.get("unit_id") or "").strip(),
-                "group_id": _norm_group(row.get("group_id")),
-                "speaker_id": _norm_group(row.get("speaker_id")),
-                "unit_text": (row.get("unit_text") or "").strip(),
-                "risk_flags": (row.get("risk_flags") or "").strip(),
-                "sample_reason": row.get("_sample_reason", ""),
+                k: ((row.get(k) or "").strip() if isinstance(row.get(k), str) else (row.get(k) or ""))
+                for k in csv_fields
+                if k != "sample_reason"
             }
+            out_row["sample_reason"] = row.get("_sample_reason", "")
             writer.writerow(out_row)
 
     # ── Stats ───────────────────────────────────────────────
