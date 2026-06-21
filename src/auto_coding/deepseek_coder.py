@@ -87,7 +87,10 @@ def run_deepseek_coding(project_dir: str | Path, round_id: str = "round_01",
                 f"Round directory already has results: {rd}\n"
                 f"Use overwrite=True to replace."
             )
+    if overwrite and rd.exists():
+        _clean_round_artifacts(rd)
     rd.mkdir(parents=True, exist_ok=True)
+    _write_round_status(rd, "running")
     log_dir = rd / "logs"; log_dir.mkdir(parents=True, exist_ok=True)
     ts = datetime.now(timezone.utc).isoformat()
 
@@ -221,6 +224,32 @@ def _write_api_log(log_dir, entries):
     with open(p, "w", encoding="utf-8") as f:
         for entry in entries:
             f.write(json.dumps(entry, ensure_ascii=False) + "\n")
+
+
+def _write_round_status(rd, status, audit_passed=False, failure_stage="", failure_reasons=None):
+    import json as _json
+    s = {"round_id": rd.name, "status": status, "audit_passed": audit_passed,
+         "failure_stage": failure_stage, "failure_reasons": failure_reasons or [],
+         "codebook_candidate_accepted": status == "accepted"}
+    with open(rd / "round_status.json", "w", encoding="utf-8") as f:
+        _json.dump(s, f, ensure_ascii=False, indent=2)
+    return s
+
+
+def _clean_round_artifacts(rd):
+    import shutil
+    for name in ["coder_A_results.jsonl", "coder_B_results.jsonl",
+                 "adjudication_results.jsonl", "disagreement_table.csv",
+                 "low_confidence_agreement_items.csv", "low_confidence_agreement_items.jsonl",
+                 "deepseek_run_audit_report.json", "deepseek_run_audit_report.md",
+                 "round_status.json", "unresolved_items.csv"]:
+        p = rd / name; p.unlink(missing_ok=True)
+    for pat in ["codebook_revision_proposal_*.json", "raw_*.json"]:
+        for p in rd.glob(pat): p.unlink()
+    for d in ["logs", "cache_A", "cache_B"]:
+        p = rd / d
+        if p.exists():
+            shutil.rmtree(p)
 
 
 def _mock_results(mock_items, coder_id, codebook_version, round_id, rd, ts):

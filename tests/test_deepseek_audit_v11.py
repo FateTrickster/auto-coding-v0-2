@@ -9,6 +9,10 @@ class TestAudit:
     def _setup(self, d, a_code="IS2", b_code="IS2"):
         d = Path(d); rd = d / "09_deepseek_runs" / "round_01"; rd.mkdir(parents=True)
         (rd / "logs").mkdir(parents=True)
+        # Create raw response files so path-existence check passes
+        for i in range(3):
+            (d / f"raw_A_u{i}.json").write_text("{}")
+            (d / f"raw_B_u{i}.json").write_text("{}")
         with open(rd / "coder_A_results.jsonl", "w", encoding="utf-8") as f:
             for i in range(3): f.write(json.dumps({"unit_id":f"u{i}","primary_code":a_code,"parse_ok":True,"cache_hit":False,"retry_count":0,"coder_id":"A","run_id":"rA","raw_response_path":f"raw_A_u{i}.json","codebook_version":"v1.0","round_id":"round_01"})+"\n")
         with open(rd / "coder_B_results.jsonl", "w", encoding="utf-8") as f:
@@ -59,6 +63,33 @@ class TestAudit:
             d = Path(d)
             rd = d / "09_deepseek_runs" / "round_01"; rd.mkdir(parents=True)
             (rd / "logs").mkdir(parents=True)
+            r = audit(d, "09_deepseek_runs/round_01")
+            assert r["audit_passed"] is False
+
+    def test_parse_ok_false_fails_audit(self):
+        with tempfile.TemporaryDirectory() as d:
+            self._setup(d)
+            # Overwrite with a parse failure
+            rd = Path(d) / "09_deepseek_runs" / "round_01"
+            with open(rd / "coder_A_results.jsonl", "w", encoding="utf-8") as f:
+                f.write(json.dumps({"unit_id":"u0","primary_code":"IS2","parse_ok":False,"coder_id":"A","run_id":"rA","raw_response_path":"raw_A_u0.json","codebook_version":"v1.0","round_id":"round_01"})+"\n")
+            r = audit(d, "09_deepseek_runs/round_01")
+            assert r["audit_passed"] is False
+
+    def test_illegal_label_fails_audit(self):
+        with tempfile.TemporaryDirectory() as d:
+            self._setup(d, a_code="IS5")
+            r = audit(d, "09_deepseek_runs/round_01")
+            assert r["audit_passed"] is False
+
+    def test_mismatched_unit_sets_fails_audit(self):
+        with tempfile.TemporaryDirectory() as d:
+            self._setup(d)
+            rd = Path(d) / "09_deepseek_runs" / "round_01"
+            # Add extra unit to A only (create raw file first)
+            (Path(d) / "raw_A_u99.json").write_text("{}")
+            with open(rd / "coder_A_results.jsonl", "a", encoding="utf-8") as f:
+                f.write(json.dumps({"unit_id":"u99","primary_code":"IS2","parse_ok":True,"coder_id":"A","run_id":"rA","raw_response_path":"raw_A_u99.json","codebook_version":"v1.0","round_id":"round_01"})+"\n")
             r = audit(d, "09_deepseek_runs/round_01")
             assert r["audit_passed"] is False
 

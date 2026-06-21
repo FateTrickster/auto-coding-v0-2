@@ -78,7 +78,6 @@ def audit(project_dir: str | Path, run_dir: str = "09_deepseek_runs/round_01") -
                     and am[uid]["primary_code"] != bm[uid]["primary_code"]}
     adj_ids = {r["unit_id"] for r in adj_items}
     result["all_disagreements_have_decision"] = dis_unit_ids <= adj_ids
-    result["adjudication_contains_only_disagreements"] = adj_ids <= dis_unit_ids if dis_unit_ids else True
 
     all_resolved_have_final = all(
         r.get("final_primary_code") is not None
@@ -127,11 +126,44 @@ def audit(project_dir: str | Path, run_dir: str = "09_deepseek_runs/round_01") -
         result["api_real_calls"] = 0; result["api_tokens"] = 0; result["api_time_s"] = 0
         result["average_latency_s"] = 0; result["max_latency_s"] = 0
 
+    # ── Parse-ok and label checks ─────────────────────────
+    codebook_labels = _load_codebook_labels(root)
+    parse_ok_a = all(r.get("parse_ok") for r in a_items) if a_items else False
+    parse_ok_b = all(r.get("parse_ok") for r in b_items) if b_items else False
+    legal_a = all(r.get("primary_code", "") in codebook_labels for r in a_items if r.get("parse_ok"))
+    legal_b = all(r.get("primary_code", "") in codebook_labels for r in b_items if r.get("parse_ok"))
+    raw_paths_exist = all(
+        Path(root / (r.get("raw_response_path", ""))).exists()
+        for r in a_items + b_items if r.get("raw_response_path")
+    ) if (a_items or b_items) else False
+
+    # ── 1:1 disagreement → adjudication ───────────────────
+    adj_unit_counts = {}
+    for r in adj_items:
+        uid = r.get("unit_id", "")
+        adj_unit_counts[uid] = adj_unit_counts.get(uid, 0) + 1
+    one_adj_per_dis = all(
+        adj_unit_counts.get(uid, 0) == 1 for uid in dis_unit_ids
+    ) if dis_unit_ids else True
+
+    result["parse_ok_all_A"] = parse_ok_a
+    result["parse_ok_all_B"] = parse_ok_b
+    result["labels_from_codebook"] = legal_a and legal_b
+    result["raw_paths_exist"] = raw_paths_exist
+    result["exactly_one_adjudication_per_disagreement"] = one_adj_per_dis
+    result["adjudication_contains_only_disagreements"] = (
+        adj_ids <= dis_unit_ids if dis_unit_ids else True
+    )
+
     # ── Audit verdict ─────────────────────────────────────
     critical = [
-        n_a > 0, n_b > 0,  # must have results
-        independence_ok,
-        n_a == n_b,
+        n_a > 0, n_b > 0,
+        independence_ok, n_a == n_b,
+        parse_ok_a, parse_ok_b,
+        legal_a, legal_b,
+        raw_paths_exist if (a_items or b_items) else True,
+        one_adj_per_dis,
+        result.get("adjudication_contains_only_disagreements", True),
         result.get("all_disagreements_have_decision", True),
         result.get("all_resolved_have_final_code", True),
         result.get("all_unresolved_have_reason", True),
@@ -200,3 +232,16 @@ def _load_jsonl(p: Path) -> list[dict]:
     if not p.exists():
         return []
     return [json.loads(l) for l in p.read_text(encoding="utf-8").splitlines() if l.strip()]
+
+
+def _load_codebook_labels(root: Path) -> set[str]:
+    """Load valid labels from frozen codebook, fallback IS1-IS4."""
+    cb_path = root / "01_codebook" / "final_codebook_v1.0.yaml"
+    if not cb_path.exists():
+        cb_path = root / "01_codebook" / "codebook_v1.0.yaml"
+    if cb_path.exists():
+        import yaml
+        with open(cb_path, encoding="utf-8") as f:
+            cb = yaml.safe_load(f)
+        return {c.get("label") or c.get("code_id", "") for c in cb.get("codes", [])}
+    return {"IS1", "IS2", "IS3", "IS4"}
