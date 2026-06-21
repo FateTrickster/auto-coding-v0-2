@@ -244,10 +244,10 @@ def _code_units_concurrent(units, prompt_a, prompt_b, valid, rd, log_dir, ts,
 
 
 def _write_api_log(log_dir: Path, entries: list[dict]) -> None:
-    """Write unified API call log — single writer, thread-safe by invocation timing."""
+    """Write unified API call log — overwrites to prevent cross-run accumulation."""
     log_dir.mkdir(parents=True, exist_ok=True)
     p = log_dir / "deepseek_api_calls.jsonl"
-    with open(p, "a", encoding="utf-8") as f:
+    with open(p, "w", encoding="utf-8") as f:
         for entry in entries:
             f.write(json.dumps(entry, ensure_ascii=False) + "\n")
 

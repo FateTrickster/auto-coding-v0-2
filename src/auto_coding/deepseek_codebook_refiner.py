@@ -99,7 +99,9 @@ def _mock_refine(adj, round_id, cv):
 
 
 def _deepseek_refine(eligible, client, codebook, round_id, cv):
-    """Refine codebook based on resolved adjudication evidence."""
+    """Refine codebook based on resolved adjudication evidence.
+    Program fills evidence_decisions and affected_patterns from matched candidates.
+    """
     if not eligible: return []
     candidates = [r for r in eligible
                   if r.get("codebook_change_needed") or
@@ -117,25 +119,39 @@ def _deepseek_refine(eligible, client, codebook, round_id, cv):
             ct = llm.get("change_type","")
             if ct not in ALLOWED_CHANGE_TYPES:
                 ct = "add_boundary_case"
-            result.append(_build_change(i, ct, llm.get("target_codes",[]),
+            target_codes = llm.get("target_codes", [])
+            # Match evidence: find candidates whose A/B labels match target_codes
+            evidence_ids = []
+            affected = []
+            if target_codes:
+                tc_set = set(target_codes)
+                for c in candidates:
+                    ab = {c.get("coder_A_label", ""), c.get("coder_B_label", "")}
+                    if ab == tc_set or tc_set <= ab:
+                        did = c.get("decision_id", "")
+                        if did:
+                            evidence_ids.append(did)
+                        affected.append(f"{c.get('coder_A_label','')}-{c.get('coder_B_label','')}")
+            schema_valid = bool(evidence_ids)  # must have evidence to auto-apply
+            result.append(_build_change(i, ct, target_codes,
                 llm.get("reason",""), llm.get("proposed_text",""),
-                llm.get("requires_recoding", False), [], [], round_id, cv))
+                llm.get("requires_recoding", False), evidence_ids,
+                affected, round_id, cv, schema_valid=schema_valid))
         return result
     except Exception:
-        return _mock_refine(eligible, round_id, cv)
+        # Do NOT silently fall back to mock. Return empty with failed status.
+        return []
 
 
 def _build_change(ci, change_type, target_codes, reason, proposed_text,
                   requires_recoding, evidence_decisions, affected_patterns,
-                  round_id, source_cv):
+                  round_id, source_cv, schema_valid=True):
     return {
-        # LLM fields
         "change_type": change_type,
         "target_codes": target_codes,
         "reason": reason,
         "proposed_text": proposed_text,
         "requires_recoding": requires_recoding,
-        # Program-generated fields
         "change_id": f"C{ci:04d}",
         "round_id": round_id,
         "source_codebook_version": source_cv,
@@ -143,5 +159,5 @@ def _build_change(ci, change_type, target_codes, reason, proposed_text,
         "evidence_decisions": evidence_decisions,
         "risk": "low",
         "affected_patterns": affected_patterns,
-        "schema_valid": True,
+        "schema_valid": schema_valid,
     }

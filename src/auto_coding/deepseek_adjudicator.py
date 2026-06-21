@@ -66,12 +66,16 @@ def run_deepseek_adjudication(project_dir: str | Path, round_id: str = "round_01
         dis.append({"unit_id": uid, "unit_text": "", "coder_A_label": la or "", "coder_B_label": lb or "",
                     "coder_A_reason": ra.get("reason",""), "coder_B_reason": rb.get("reason","")})
 
-    # Write low-confidence agreement watchlist
-    if low_conf_agree:
-        _save(rd / "low_confidence_agreement_items.jsonl", low_conf_agree)
-        with open(rd / "low_confidence_agreement_items.csv", "w", encoding="utf-8", newline="") as f:
-            w = csv.DictWriter(f, fieldnames=list(low_conf_agree[0].keys()))
-            w.writeheader(); w.writerows(low_conf_agree)
+    # Write low-confidence agreement watchlist (always overwrite, even if empty)
+    _save(rd / "low_confidence_agreement_items.jsonl", low_conf_agree)
+    wl_fields = ["unit_id", "coder_A_label", "coder_B_label", "coder_A_confidence",
+                 "coder_B_confidence", "coder_A_uncertain", "coder_B_uncertain",
+                 "coder_A_reason", "coder_B_reason"]
+    with open(rd / "low_confidence_agreement_items.csv", "w", encoding="utf-8", newline="") as f:
+        w = csv.DictWriter(f, fieldnames=wl_fields, extrasaction="ignore")
+        w.writeheader()
+        if low_conf_agree:
+            w.writerows(low_conf_agree)
 
     if dis:
         with open(rd / "disagreement_table.csv", "w", encoding="utf-8", newline="") as f:

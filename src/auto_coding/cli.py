@@ -484,6 +484,10 @@ def deepseek_self_loop_round_cli(
     print(f"[3/3] DeepSeek refine...")
     r = run_deepseek_refine(project_dir, round_id, codebook_version, mode)
     print(f"  Changes={r['changes_count']}")
+    print(f"[4/4] Audit...")
+    from .deepseek_run_auditor import audit
+    aud = audit(project_dir, f"09_deepseek_runs/{round_id}")
+    print(f"  Audit: {'PASS' if aud['audit_passed'] else 'FAIL'}")
 
 
 @app.command("audit-deepseek-run")
@@ -498,6 +502,7 @@ def audit_deepseek_run_cli(
     print(f"B: {r.get('coder_B_rows',0)} rows, {r.get('coder_B_parse_ok',0)} OK")
     print(f"Agreement: {r.get('agreement_count','?')}/{r.get('agreement_pairs','?')} ({r.get('agreement_pct','?')})")
     print(f"API calls: {r.get('api_real_calls',0)}, Tokens: {r.get('api_tokens',0)}")
+    print(f"Audit: {'PASS' if r.get('audit_passed') else 'FAIL'}")
 
 
 @app.command("deepseek-adjudication-stress-test")

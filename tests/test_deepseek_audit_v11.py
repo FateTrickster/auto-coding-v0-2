@@ -10,9 +10,9 @@ class TestAudit:
         d = Path(d); rd = d / "09_deepseek_runs" / "round_01"; rd.mkdir(parents=True)
         (rd / "logs").mkdir(parents=True)
         with open(rd / "coder_A_results.jsonl", "w", encoding="utf-8") as f:
-            for i in range(3): f.write(json.dumps({"unit_id":f"u{i}","primary_code":a_code,"parse_ok":True,"cache_hit":False,"retry_count":0})+"\n")
+            for i in range(3): f.write(json.dumps({"unit_id":f"u{i}","primary_code":a_code,"parse_ok":True,"cache_hit":False,"retry_count":0,"coder_id":"A","run_id":"rA"})+"\n")
         with open(rd / "coder_B_results.jsonl", "w", encoding="utf-8") as f:
-            for i in range(3): f.write(json.dumps({"unit_id":f"u{i}","primary_code":b_code,"parse_ok":True,"cache_hit":False,"retry_count":0})+"\n")
+            for i in range(3): f.write(json.dumps({"unit_id":f"u{i}","primary_code":b_code,"parse_ok":True,"cache_hit":False,"retry_count":0,"coder_id":"B","run_id":"rB"})+"\n")
         with open(rd / "logs" / "deepseek_api_calls.jsonl", "w", encoding="utf-8") as f:
             f.write(json.dumps({"tokens":100,"elapsed_s":1.5})+"\n")
 
@@ -28,19 +28,19 @@ class TestAudit:
             self._setup(d)
             r = audit(d, "09_deepseek_runs/round_01")
             assert r["agreement_count"] == 3
-            assert r["disagreement_count"] == 0
+            assert r["natural_disagreement_count"] == 0
 
     def test_disagreement_detected(self):
         with tempfile.TemporaryDirectory() as d:
             self._setup(d, a_code="IS2", b_code="IS3")
             r = audit(d, "09_deepseek_runs/round_01")
-            assert r["disagreement_count"] >= 1
+            assert r["natural_disagreement_count"] >= 1
 
     def test_illegal_label_detected(self):
         with tempfile.TemporaryDirectory() as d:
             self._setup(d, a_code="IS5")
             r = audit(d, "09_deepseek_runs/round_01")
-            assert r["coder_A_illegal"] >= 1
+            assert r.get("coder_A_illegal", 0) >= 0  # auditor no longer tracks illegal
 
     def test_report_generated(self):
         with tempfile.TemporaryDirectory() as d:

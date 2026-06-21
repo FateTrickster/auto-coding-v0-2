@@ -45,6 +45,7 @@ class DeepSeekClient:
         if self.cache_dir:
             cached = self._cache_get(cache_key)
             if cached is not None:
+                self.last_retry_count = 0  # cache hit, no retries
                 return cached
 
         last_err = None
@@ -59,7 +60,7 @@ class DeepSeekClient:
                 last_err = e
                 if attempt < self.max_retries:
                     time.sleep(2 ** attempt)
-        self.last_retry_count = self.max_retries
+        self.last_retry_count = self.max_retries - 1  # retry_count = attempts - 1
         raise RuntimeError(f"DeepSeek failed after {self.max_retries} retries: {last_err}")
 
     def _call(self, system: str, user: str, max_tokens: int) -> dict:
