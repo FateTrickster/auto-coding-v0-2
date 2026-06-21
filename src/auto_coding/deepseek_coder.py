@@ -101,14 +101,9 @@ def run_deepseek_coding(project_dir: str | Path, round_id: str = "round_01",
     valid = {"IS1", "IS2", "IS3", "IS4"}
 
     if mode == "mock":
-        from .coder import MockCoderAgent
-        ra = _mock_results(MockCoderAgent("A", 42).code(units, codebook_version), "A", rd, ts)
-        rb = _mock_results(MockCoderAgent("B", 43).code(units, codebook_version), "B", rd, ts)
+        ra, rb = _run_mock_coding(units, codebook_version, rd, ts)
     else:
-        from .deepseek_client import DeepSeekClient
-        from concurrent.futures import ThreadPoolExecutor, as_completed
-        # Thread-local clients avoid shared mutable state
-        ra, rb = _code_units_concurrent(
+        ra, rb = _run_real_coding(
             units, prompt_a, prompt_b, valid, rd, log_dir, ts,
             codebook_version, round_id, concurrency,
         )
@@ -162,9 +157,17 @@ def _code_units(units, coder_id, system, client, valid, rd, log_dir, ts, cv, rou
     return results
 
 
-def _code_units_concurrent(units, prompt_a, prompt_b, valid, rd, log_dir, ts,
-                            cv, round_id, concurrency):
-    """Run A/B coding concurrently. Each task creates its own client.
+def _run_mock_coding(units, codebook_version, rd, ts):
+    """Mock coding using MockCoderAgent — for testing only, not production."""
+    from .coder import MockCoderAgent
+    ra = _mock_results(MockCoderAgent("A", 42).code(units, codebook_version), "A", rd, ts)
+    rb = _mock_results(MockCoderAgent("B", 43).code(units, codebook_version), "B", rd, ts)
+    return ra, rb
+
+
+def _run_real_coding(units, prompt_a, prompt_b, valid, rd, log_dir, ts,
+                      cv, round_id, concurrency):
+    """Production DeepSeek coding. Each task creates its own client.
     API logs and retry counts are collected and aggregated by the main thread.
     """
     from .deepseek_client import DeepSeekClient

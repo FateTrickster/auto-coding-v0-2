@@ -562,7 +562,7 @@ def sample(
         coverage = _analyze_sample_coverage(valid_rows, valid_rows, target_size)
         return _build_output(
             valid_rows, out_dir, target_size, input_count, seed,
-            config, None, {}, is_round01, coverage, original_fieldnames, rng,
+            config, None, is_round01, coverage, original_fieldnames,
         )
 
     # ── Pool targets ────────────────────────────────────────
@@ -660,7 +660,7 @@ def sample(
     coverage = _analyze_sample_coverage(valid_rows, final_selected, target_size)
     return _build_output(
         final_selected, out_dir, target_size, input_count, seed,
-        config, resolved_control, p2_counts, is_round01, coverage, original_fieldnames, rng,
+        config, resolved_control, is_round01, coverage, original_fieldnames,
     )
 
 
@@ -799,11 +799,9 @@ def _build_output(
     seed: int,
     config: dict,
     resolved_control: str | None,
-    p2_counts: dict[str, int],
     is_round01: bool,
     coverage: dict,
     original_fieldnames: list[str],
-    rng: random.Random,
 ) -> dict[str, Any]:
     out_dir.mkdir(parents=True, exist_ok=True)
     csv_path = _write_sample_csv(selected, out_dir, original_fieldnames)
