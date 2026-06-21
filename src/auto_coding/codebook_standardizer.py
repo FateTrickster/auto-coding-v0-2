@@ -39,6 +39,16 @@ class ParseError(Exception):
         super().__init__(f"Line {line_no}: {msg}" + (f" [{line_text[:80]}]" if line_text else ""))
 
 
+def _validate_label_complete(code: dict, line_no: int) -> None:
+    """Verify a label has exactly all 10 fields in order, each non-empty."""
+    for fn in FIELD_ORDER:
+        fk = FIELD_MAP[fn]
+        if fk not in code:
+            raise ParseError(f"Missing field {fn} in {code['code_id']}", line_no)
+        if not isinstance(code[fk], list) or len(code[fk]) == 0:
+            raise ParseError(f"Empty field {fn} in {code['code_id']}", line_no)
+
+
 def parse_markdown_codebook(text: str) -> list[dict]:
     """Parse standardized initial_codebook.md into a list of code dicts using a state machine."""
     lines = text.split("\n")
@@ -46,6 +56,8 @@ def parse_markdown_codebook(text: str) -> list[dict]:
     current_code: dict | None = None
     current_field: str | None = None
     last_item: str | None = None
+    seen_fields: set[str] = set()
+    next_expected: int = 0
     in_appendix = False
 
     for line_no, raw_line in enumerate(lines, 1):
@@ -81,6 +93,10 @@ def parse_markdown_codebook(text: str) -> list[dict]:
             if len(codes) >= 4:
                 raise ParseError("More than 4 labels found", line_no, stripped)
 
+            # Validate previous label had all 10 fields
+            if current_code is not None:
+                _validate_label_complete(current_code, line_no)
+
             current_code = {
                 "code_id": code_id, "code_name": code_name, "definition": [],
                 "inclusion_rules": [], "exclusion_rules": [],
@@ -90,6 +106,8 @@ def parse_markdown_codebook(text: str) -> list[dict]:
             }
             current_field = None
             last_item = None
+            seen_fields = set()
+            next_expected = 0
             codes.append(current_code)
             continue
 
@@ -101,8 +119,21 @@ def parse_markdown_codebook(text: str) -> list[dict]:
             field_name = field_m.group(1)
             if field_name not in FIELD_MAP:
                 raise ParseError(f"Unknown field: {field_name}", line_no, stripped)
-            if field_name not in FIELD_ORDER:
-                raise ParseError(f"Field out of order", line_no, stripped)
+            # Duplicate check
+            if field_name in seen_fields:
+                raise ParseError(
+                    f"Duplicate field '{field_name}' (previously seen in this label)",
+                    line_no, stripped,
+                )
+            seen_fields.add(field_name)
+            # Order check
+            expected = FIELD_ORDER[next_expected] if next_expected < len(FIELD_ORDER) else None
+            if field_name != expected:
+                raise ParseError(
+                    f"Expected field '{expected}', got '{field_name}'",
+                    line_no, stripped,
+                )
+            next_expected += 1
             current_field = field_name
             last_item = None
             continue
@@ -132,7 +163,10 @@ def parse_markdown_codebook(text: str) -> list[dict]:
         # Anything else is unexpected
         raise ParseError(f"Unexpected content outside field", line_no, stripped)
 
-    # Validate
+    # Validate last label completeness
+    if current_code is not None:
+        _validate_label_complete(current_code, len(lines))
+
     if len(codes) != 4:
         raise ParseError(f"Expected 4 labels, found {len(codes)}")
     for code in codes:

@@ -26,6 +26,8 @@ from typing import Any
 
 import yaml
 
+from .structural_rules import SHORT_TEXT_MAX_CHARS, LONG_TEXT_MIN_CHARS
+
 # ── Generic helpers ─────────────────────────────────────────────
 
 TRUE_VALUES = {"true", "1", "yes", "y"}
@@ -278,13 +280,13 @@ def _parse_turn_order(val: str) -> int:
 def _is_structural_short(row: dict) -> bool:
     if _parse_bool(row.get("short_text_flag")):
         return True
-    return _char_len(row.get("unit_text", "")) <= 5
+    return _char_len(row.get("unit_text", "")) <= SHORT_TEXT_MAX_CHARS
 
 
 def _is_structural_long(row: dict) -> bool:
     if _parse_bool(row.get("long_text_flag")):
         return True
-    return _char_len(row.get("unit_text", "")) >= 120
+    return _char_len(row.get("unit_text", "")) >= LONG_TEXT_MIN_CHARS
 
 
 def _is_structural_missing_context(row: dict) -> bool:

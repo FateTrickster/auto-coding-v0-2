@@ -5,6 +5,7 @@ from __future__ import annotations
 import csv
 from pathlib import Path
 
+from .structural_rules import SHORT_TEXT_MAX_CHARS, LONG_TEXT_MIN_CHARS
 
 REQUIRED_FIELDS = ["unit_id", "turn_id", "group_id", "speaker_id", "unit_text"]
 
@@ -14,12 +15,27 @@ def validate(unit_table_path: str | Path, out_dir: str | Path) -> dict:
 
     Returns dict with paths and stats.
     """
-    out_dir = Path(out_dir)
-    out_dir.mkdir(parents=True, exist_ok=True)
+    unit_table_path = Path(unit_table_path)
+    if not unit_table_path.exists():
+        raise FileNotFoundError(f"Unit table not found: {unit_table_path}")
 
+    # Schema gate: validate required fields BEFORE creating any output
     with open(unit_table_path, "r", encoding="utf-8-sig") as f:
         reader = csv.DictReader(f)
+        available_fields = reader.fieldnames or []
         rows = list(reader)
+
+    missing = [f for f in REQUIRED_FIELDS if f not in (available_fields or [])]
+    if missing:
+        raise ValueError(
+            f"Missing required field(s) in {unit_table_path}: {missing}. "
+            f"Required: {REQUIRED_FIELDS}"
+        )
+    if not available_fields or all(not h.strip() for h in available_fields):
+        raise ValueError(f"Empty or invalid header in {unit_table_path}")
+
+    out_dir = Path(out_dir)
+    out_dir.mkdir(parents=True, exist_ok=True)
 
     fieldnames = list(rows[0].keys()) if rows else []
     enhanced_fieldnames = fieldnames + [
@@ -64,16 +80,18 @@ def validate(unit_table_path: str | Path, out_dir: str | Path) -> dict:
             empty_text += 1
         else:
             text_len = len(text)
-            if text_len <= 3:
+            if text_len <= SHORT_TEXT_MAX_CHARS:
                 flags.append("short_text")
                 notes.append(f"极短文本 ({text_len}字)")
                 short_text += 1
-            if text_len >= 120:
+            if text_len >= LONG_TEXT_MIN_CHARS:
                 flags.append("long_text")
                 notes.append(f"长文本 ({text_len}字)")
                 long_text += 1
-            # Check for possible multi-function (has ? and multiple clauses)
-            if "?" in text and ("。" in text or "；" in text or "；" in text):
+            # Check for possible multi-function (has question mark and multiple clauses)
+            has_question = "?" in text or "？" in text
+            has_multiple_clauses = any(mark in text for mark in ("。", "；", ";"))
+            if has_question and has_multiple_clauses:
                 flags.append("multi_function")
                 notes.append("疑似多功能文本")
                 multi_function += 1
@@ -131,8 +149,8 @@ def _build_report(**kwargs) -> str:
     ]
 
     for label, key in [
-        ("空文本", "empty_text"), ("极短文本 (≤3字)", "short_text"),
-        ("长文本 (≥120字)", "long_text"), ("缺上下文", "missing_context"),
+        ("空文本", "empty_text"), (f"极短文本 (≤{SHORT_TEXT_MAX_CHARS}字)", "short_text"),
+        (f"长文本 (≥{LONG_TEXT_MIN_CHARS}字)", "long_text"), ("缺上下文", "missing_context"),
         ("疑似多功能文本", "multi_function"), ("重复 unit_id", "dup_ids"),
     ]:
         count = kwargs.get(key, 0)
