@@ -50,38 +50,32 @@ class TestRobustJsonParse:
         assert result["label"] == "IS2"
 
 
-class TestJsonRepair:
-    def test_unescaped_quotes_in_code_block(self):
-        """LLM wrote \"okok\" unescaped inside a JSON string."""
+class TestMalformedJson:
+    def test_unescaped_quotes_not_repaired(self):
+        """Parser no longer performs heuristic repair. Bad JSON fails cleanly."""
         text = '```json\n{"label": "IS2", "rationale": "确认\"okok\"无感叹号"}\n```'
         result, err = robust_json_parse(text)
-        assert err is None, f"Should repair: {err}"
-        assert result["label"] == "IS2"
-        assert "okok" in result["rationale"]
+        assert result is None, "Unescaped quotes should not be repaired"
 
-    def test_unescaped_quotes_chinese_context(self):
-        """Unescaped quotes with Chinese text around them."""
+    def test_unescaped_quotes_chinese_not_repaired(self):
+        """Parser no longer performs heuristic repair of Chinese-context quotes."""
         text = '```json\n{"label": "IS3", "why_not_alternative": "如果是\"我来写吗\"则为IS2"}\n```'
         result, err = robust_json_parse(text)
-        assert err is None, f"Should repair: {err}"
-        assert result["label"] == "IS3"
+        assert result is None, "Unescaped quotes should not be repaired"
 
-    def test_trailing_comma(self):
-        """Trailing comma before }."""
+    def test_trailing_comma_not_repaired(self):
+        """Trailing comma is invalid JSON, parser returns error."""
         text = '{"label": "IS2", "confidence": 0.9,}'
         result, err = robust_json_parse(text)
-        assert err is None, f"Should repair trailing comma: {err}"
-        assert result["label"] == "IS2"
+        assert result is None, "Trailing comma should not be repaired"
 
     def test_normal_json_unaffected(self):
-        """Normal JSON should still parse correctly."""
         text = '{"label": "IS2", "confidence": 0.9, "rationale": "测试"}'
         result, err = robust_json_parse(text)
         assert err is None
         assert result["label"] == "IS2"
 
     def test_unfixable_json_still_fails(self):
-        """Completely broken JSON should still fail."""
         text = "not json at all {broken[[["
         result, err = robust_json_parse(text)
         assert result is None

@@ -7,9 +7,6 @@ import os
 import re
 from pathlib import Path
 
-from .schemas import CodingInput, ContextMessage
-
-
 def _extract_group_id(filepath: str | Path) -> str:
     """Extract gNN from a filename like '5.csv' or '/path/5.csv'."""
     name = Path(filepath).stem  # "5"

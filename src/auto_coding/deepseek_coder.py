@@ -75,7 +75,8 @@ def run_deepseek_coding(project_dir: str | Path, round_id: str = "round_01",
                         max_items: int = 30,
                         coder_a_profile: str = "default",
                         coder_b_profile: str = "default",
-                        input_units_path: str | None = None) -> dict:
+                        input_units_path: str | None = None,
+                        concurrency: int = 4) -> dict:
     root = Path(project_dir)
     rd = root / "09_deepseek_runs" / round_id
     rd.mkdir(parents=True, exist_ok=True)
@@ -105,11 +106,12 @@ def run_deepseek_coding(project_dir: str | Path, round_id: str = "round_01",
         rb = _mock_results(MockCoderAgent("B", 43).code(units, codebook_version), "B", rd, ts)
     else:
         from .deepseek_client import DeepSeekClient
-        client_a = DeepSeekClient(cache_dir=log_dir / "cache_A")
-        client_b = DeepSeekClient(cache_dir=log_dir / "cache_B")
-        ra = _code_units(units, "A", prompt_a, client_a, valid, rd, log_dir, ts, codebook_version, round_id)
-        rb = _code_units(units, "B", prompt_b, client_b, valid, rd, log_dir, ts, codebook_version, round_id)
-        client_a.save_logs(log_dir); client_b.save_logs(log_dir)
+        from concurrent.futures import ThreadPoolExecutor, as_completed
+        # Thread-local clients avoid shared mutable state
+        ra, rb = _code_units_concurrent(
+            units, prompt_a, prompt_b, valid, rd, log_dir, ts,
+            codebook_version, round_id, concurrency,
+        )
 
     _save_jl(rd / "coder_A_results.jsonl", ra)
     _save_jl(rd / "coder_B_results.jsonl", rb)
@@ -158,6 +160,66 @@ def _code_units(units, coder_id, system, client, valid, rd, log_dir, ts, cv, rou
             results.append(_build_result(uid, coder_id, None, False,
                 str(e), ts, cv, round_id, cache_hit, retry_count, ""))
     return results
+
+
+def _code_units_concurrent(units, prompt_a, prompt_b, valid, rd, log_dir, ts,
+                            cv, round_id, concurrency):
+    """Run A/B coding concurrently. Each worker gets its own DeepSeekClient."""
+    from .deepseek_client import DeepSeekClient
+    from concurrent.futures import ThreadPoolExecutor, as_completed
+
+    tasks = [(u, "A", prompt_a) for u in units] + [(u, "B", prompt_b) for u in units]
+    results_a: dict[str, dict] = {}
+    results_b: dict[str, dict] = {}
+
+    def _code_one(task):
+        unit, coder_id, prompt = task
+        uid = unit.get("unit_id", "")
+        text = unit.get("unit_text", "").strip()
+        ctx = unit.get("context_before", "")[:200]
+        user = f"unit_id: {uid}\ncontext: {ctx}\nunit_text: {text}"
+        client = DeepSeekClient(cache_dir=log_dir / f"cache_{coder_id}")
+        cache_hit = False
+        retry_count = 0
+
+        try:
+            cache_key = client._cache_key(prompt, user, 800)
+            if client.cache_dir and (client.cache_dir / f"{cache_key}.json").exists():
+                cache_hit = True
+            resp = client.chat_json(prompt, user, max_tokens=800)
+            llm, ignored = _validate_llm_output(resp)
+            code = llm.get("primary_code", "")
+            raw_path = log_dir / f"raw_{coder_id}_{uid}.json"
+            raw_path.write_text(json.dumps(resp, ensure_ascii=False), encoding="utf-8")
+            if code not in valid:
+                return _build_result(uid, coder_id, None, False,
+                    f"invalid_code:{code}", ts, cv, round_id, cache_hit, retry_count, str(raw_path))
+            return _build_result(uid, coder_id, code, True, "",
+                ts, cv, round_id, cache_hit, retry_count, str(raw_path),
+                confidence=llm.get("confidence", 0.7),
+                evidence_span=llm.get("evidence_span", text[:60]),
+                reason=llm.get("reason", ""),
+                uncertain=llm.get("uncertain", False),
+                ignored_fields=ignored)
+        except Exception as e:
+            return _build_result(uid, coder_id, None, False,
+                str(e), ts, cv, round_id, cache_hit, retry_count, "")
+
+    with ThreadPoolExecutor(max_workers=max(1, concurrency)) as executor:
+        futures = {executor.submit(_code_one, t): t for t in tasks}
+        for future in as_completed(futures):
+            result = future.result()
+            cid = result.get("coder_id", "")
+            uid = result.get("unit_id", "")
+            if cid == "A":
+                results_a[uid] = result
+            else:
+                results_b[uid] = result
+
+    # Preserve input order
+    ra_list = [results_a[u.get("unit_id", "")] for u in units if u.get("unit_id", "") in results_a]
+    rb_list = [results_b[u.get("unit_id", "")] for u in units if u.get("unit_id", "") in results_b]
+    return ra_list, rb_list
 
 
 def _mock_results(mock_items, coder_id, rd, ts):

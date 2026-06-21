@@ -424,10 +424,12 @@ def deepseek_pilot_code_cli(
     codebook_version: str = typer.Option("v1.0"),
     mode: str = typer.Option("mock"),
     max_items: int = typer.Option(30),
+    concurrency: int = typer.Option(4, help="Number of concurrent DeepSeek coding requests. Use 1 for sequential."),
 ):
     """Run DeepSeek A/B coding on pilot sample."""
     from .deepseek_coder import run_deepseek_coding
-    r = run_deepseek_coding(project_dir, round_id, codebook_version, mode, max_items)
+    r = run_deepseek_coding(project_dir, round_id, codebook_version, mode, max_items,
+                            concurrency=concurrency)
     print(f"DeepSeek coding: A={r['coder_a_ok']}/{r['coder_a_total']}, B={r['coder_b_ok']}/{r['coder_b_total']}")
 
 

@@ -2,7 +2,7 @@
 
 Round 1 (default, no risk_config_path):
   Uses only real structural fields from unit_table_v0.1.csv.
-  Pool 1: group_stratified (with speaker spread + order bucketing)
+  Pool 1: group_stratified (speaker round-robin with within-speaker order preservation)
   Pool 2: structural difficulty (short_text, long_text, missing_context, multi_function)
   Pool 3: optional control_group oversampling
   Fill:   random_fill
@@ -28,14 +28,7 @@ import yaml
 
 # ── Generic helpers ─────────────────────────────────────────────
 
-MEANINGLESS_RISK_VALS = {"", "none", "null", "nan", "[]", "{}", "false", "0"}
 TRUE_VALUES = {"true", "1", "yes", "y"}
-
-
-def _is_meaningful_risk(val: str | None) -> bool:
-    if val is None:
-        return False
-    return val.strip().lower() not in MEANINGLESS_RISK_VALS
 
 
 def _char_len(text: str) -> int:
@@ -148,9 +141,9 @@ def _load_and_validate(unit_table_path: Path) -> tuple[list[dict], list[str]]:
 
 def _sample_group_stratified(
     valid_rows: list[dict], pool1_target: int, rng: random.Random
-) -> tuple[list[dict], set[str], int]:
-    """Pool 1: group-stratified random. Within each group, spread across speakers
-    and time-order buckets when relevant fields exist."""
+) -> tuple[list[dict], set[str]]:
+    """Pool 1: group-stratified random with speaker round-robin and
+    within-speaker order preservation."""
 
     by_group: dict[str, list[dict]] = defaultdict(list)
     for row in valid_rows:
@@ -197,7 +190,6 @@ def _sample_group_stratified(
 
     # ── Within-group sampling with speaker spread + order bucketing ─
     selected: list[dict] = []
-    speaker_spread_count = 0
 
     for g in nonempty_groups:
         quota = group_quotas.get(g, 0)
@@ -212,7 +204,7 @@ def _sample_group_stratified(
             selected.append(row)
 
     selected_ids = {(r.get("unit_id") or "").strip() for r in selected}
-    return selected, selected_ids, speaker_spread_count
+    return selected, selected_ids
 
 
 def _sample_within_group(
@@ -579,7 +571,7 @@ def sample(
     pool3_target = target_size - pool1_target - pool2_target
 
     # ── Pool 1 ──────────────────────────────────────────────
-    p1_selected, p1_ids, speaker_spread = _sample_group_stratified(valid_rows, pool1_target, rng)
+    p1_selected, p1_ids = _sample_group_stratified(valid_rows, pool1_target, rng)
 
     # ── Pool 2 ──────────────────────────────────────────────
     remaining = [r for r in valid_rows
