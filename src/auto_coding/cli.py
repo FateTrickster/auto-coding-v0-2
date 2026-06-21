@@ -81,12 +81,15 @@ def sample_pilot_cli(
     project_dir: str = typer.Option(..., help="Project directory"),
     target_size: int = typer.Option(300, help="Target sample size"),
     seed: int = typer.Option(42, help="Random seed"),
-    risk_config: str = typer.Option(None, help="项目级风险抽样 YAML；定义 boundary patterns 和结构困难规则"),
-    control_group: str = typer.Option(None, help="需要在 pilot 中超采样的对照 group_id；优先级高于 YAML 配置"),
+    risk_config: str = typer.Option(None, help="风险画像 YAML（仅适用于 round_02 及以后）。Round 1 传入会打印警告"),
+    control_group: str = typer.Option(None, help="需要在 pilot 中超采样的对照 group_id"),
 ):
-    """Generate pilot sample via config-driven stratified sampling."""
+    """Generate pilot sample. Round 1 uses only structural fields; Round 2+ can use risk profile."""
     from .pilot_sampler import sample
     rc = Path(risk_config) if risk_config else None
+    if rc and not rc.exists():
+        print(f"WARNING: risk-config file not found: {rc}, proceeding without it.")
+        rc = None
     r = sample(
         Path(project_dir)/"03_units"/"unit_table_v0.1.csv",
         Path(project_dir)/"04_pilot",
@@ -95,7 +98,23 @@ def sample_pilot_cli(
         risk_config_path=rc,
         control_group=control_group,
     )
-    print(f"Sampled {r['sampled_count']} units, groups={r['groups_covered']}")
+    print(f"Sampled {r['sampled_count']} units, groups={r['groups_covered']}, "
+          f"risk_config={'YES' if r['risk_config_used'] else 'NO'}")
+
+
+@app.command("build-risk-profile")
+def build_risk_profile_cli(
+    project_dir: str = typer.Option(..., help="Project directory"),
+    source_round_id: str = typer.Option("round_01", help="来源轮次"),
+    target_round_id: str = typer.Option("round_02", help="目标轮次"),
+    min_confusion_count: int = typer.Option(2, help="最低混淆次数阈值"),
+):
+    """Generate risk_config candidate from round_N real disagreement/adjudication outputs."""
+    from .risk_profile_builder import build_risk_config
+    r = build_risk_config(project_dir, source_round_id, target_round_id, min_confusion_count)
+    print(f"Risk profile: {r['explicit_units_count']} explicit units, "
+          f"{r['confusion_pairs_count']} confusion pairs, "
+          f"{r['boundary_patterns_count']} boundary patterns → {r['output_path']}")
 
 
 @app.command("review-pilot-sample")
