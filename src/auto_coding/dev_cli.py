@@ -20,7 +20,7 @@ def acceptance_audit_cli(
     r = audit(project_dir)
     passed = sum(1 for c in r["checks"] if c["passed"])
     print(f"Status: {r['status']} — {passed}/{len(r['checks'])} checks passed")
-    if r["status"] == "ACCEPTED_WITH_NOTES":
+    if r["risks"]:
         print(f"Risks: {r['risks']}")
 
 

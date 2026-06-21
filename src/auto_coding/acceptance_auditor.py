@@ -33,9 +33,8 @@ def audit(project_dir: str | Path) -> dict:
     tbl_n = _count_csv(root / "07_final" / "final_coding_table.csv")
 
     for label, expected, actual in [
-        ("unit_table", unit_n, unit_n), ("coder_A", unit_n, a_n),
-        ("coder_B", unit_n, b_n), ("consensus", unit_n, con_n),
-        ("final_table", unit_n, tbl_n),
+        ("coder_A", unit_n, a_n), ("coder_B", unit_n, b_n),
+        ("consensus", unit_n, con_n), ("final_table", unit_n, tbl_n),
     ]:
         checks.append({"check_name": f"row_count:{label}", "passed": actual == expected,
                        "details": f"expected={expected}, actual={actual}"})
@@ -50,8 +49,9 @@ def audit(project_dir: str | Path) -> dict:
                        "details": f"agreement={ag}, adjudication={adj}, unresolved={un}, sum={ag+adj+un}"})
 
     # ── Coding table quality ─────────────────────────────────
+    valid_labels = _load_valid_labels(root)
     if tbl_n > 0:
-        dup = 0; empty_code = 0; illegal = 0; valid = {"IS1","IS2","IS3","IS4"}
+        dup = 0; empty_code = 0; illegal = 0
         seen = set()
         with open(root / "07_final" / "final_coding_table.csv", encoding="utf-8", newline="") as f:
             for r in csv.DictReader(f):
@@ -60,13 +60,40 @@ def audit(project_dir: str | Path) -> dict:
                 seen.add(uid)
                 code = r.get("final_primary_code","")
                 if not code: empty_code += 1
-                elif code not in valid: illegal += 1
+                elif code not in valid_labels: illegal += 1
         checks.append({"check_name": "final_table_dup_ids", "passed": dup == 0, "details": f"duplicates={dup}"})
         checks.append({"check_name": "final_table_empty_codes", "passed": empty_code == 0, "details": f"empty_codes={empty_code}"})
         checks.append({"check_name": "final_table_legal_labels", "passed": illegal == 0, "details": f"illegal={illegal}"})
 
-    # ── DeepSeek usage detection ─────────────────────────────
-    real_calls = _count_jsonl(root / "09_deepseek_runs" / "round_01" / "logs" / "deepseek_api_calls.jsonl")
+    # ── DeepSeek usage detection (scan all rounds) ───────────
+    real_calls = 0
+    deepseek_dir = root / "09_deepseek_runs"
+    if deepseek_dir.exists():
+        for log_file in sorted(deepseek_dir.glob("*/logs/deepseek_api_calls.jsonl")):
+            real_calls += _count_jsonl(log_file)
+
+    # ── Codebook frozen flag ─────────────────────────────────
+    cb_path = root / "01_codebook" / "final_codebook_v1.0.yaml"
+    cb_frozen = False
+    if cb_path.exists():
+        import yaml
+        with open(cb_path, encoding="utf-8") as f:
+            cb = yaml.safe_load(f)
+        cb_frozen = cb.get("frozen", False)
+    checks.append({"check_name": "final_codebook_frozen", "passed": cb_frozen,
+                   "details": f"frozen={cb_frozen}"})
+
+    # ── Archive manifest ─────────────────────────────────────
+    manifest = root / "99_logs" / "archive_manifest.json"
+    mfiles = 0; sha_ok = True
+    if manifest.exists():
+        m = json.loads(manifest.read_text(encoding="utf-8"))
+        mfiles = len(m.get("files", []))
+        for f in m.get("files", []):
+            if not f.get("sha256_short"):
+                sha_ok = False; break
+    checks.append({"check_name": "archive_manifest_size", "passed": mfiles > 0, "details": f"files={mfiles}"})
+    checks.append({"check_name": "archive_sha256", "passed": sha_ok, "details": "sha256 present"})
 
     # ── Reliability ──────────────────────────────────────────
     rel_path = root / "06_formal_coding" / "formal_agreement_metrics.json"
@@ -79,6 +106,7 @@ def audit(project_dir: str | Path) -> dict:
     all_pass = all(c["passed"] for c in checks)
     risks = []
     if real_calls == 0: risks.append("no_real_deepseek_calls_detected")
+    if not cb_frozen: risks.append("final_codebook_not_frozen")
     status = "PASS" if all_pass else "FAIL"
 
     result = {
@@ -89,6 +117,17 @@ def audit(project_dir: str | Path) -> dict:
         "checks": checks,
     }
     return result
+
+
+def _load_valid_labels(root: Path) -> set[str]:
+    """Load valid labels from frozen codebook, fall back to IS1-IS4."""
+    cb_path = root / "01_codebook" / "final_codebook_v1.0.yaml"
+    if cb_path.exists():
+        import yaml
+        with open(cb_path, encoding="utf-8") as f:
+            cb = yaml.safe_load(f)
+        return {c.get("label") or c.get("code_id", "") for c in cb.get("codes", [])}
+    return {"IS1", "IS2", "IS3", "IS4"}
 
 
 def _count_csv(p: Path) -> int:

@@ -101,7 +101,7 @@ def run_deepseek_coding(project_dir: str | Path, round_id: str = "round_01",
     valid = {"IS1", "IS2", "IS3", "IS4"}
 
     if mode == "mock":
-        ra, rb = _run_mock_coding(units, codebook_version, rd, ts)
+        ra, rb = _run_mock_coding(units, codebook_version, round_id, rd, ts)
     else:
         ra, rb = _run_real_coding(
             units, prompt_a, prompt_b, valid, rd, log_dir, ts,
@@ -116,52 +116,17 @@ def run_deepseek_coding(project_dir: str | Path, round_id: str = "round_01",
             "coder_b_total": len(rb), "coder_b_ok": ok_b}
 
 
-def _code_units(units, coder_id, system, client, valid, rd, log_dir, ts, cv, round_id):
-    results = []
-    for u in units:
-        uid = u.get("unit_id", "")
-        text = u.get("unit_text", "").strip()
-        ctx = u.get("context_before", "")[:200]
-        user = f"unit_id: {uid}\ncontext: {ctx}\nunit_text: {text}"
-        cache_hit = False
-        retry_count = 0
-        raw = None
-
-        try:
-            # Check cache before calling
-            cache_key = client._cache_key(system, user, 800)
-            if client.cache_dir and (client.cache_dir / f"{cache_key}.json").exists():
-                cache_hit = True
-
-            resp = client.chat_json(system, user, max_tokens=800)
-            llm, ignored = _validate_llm_output(resp)
-            code = llm.get("primary_code", "")
-
-            raw_path = log_dir / f"raw_{coder_id}_{uid}.json"
-            raw_path.write_text(json.dumps(resp, ensure_ascii=False), encoding="utf-8")
-
-            if code not in valid:
-                results.append(_build_result(uid, coder_id, None, False,
-                    f"invalid_code:{code}", ts, cv, round_id, cache_hit, retry_count, str(raw_path)))
-            else:
-                results.append(_build_result(uid, coder_id, code, True, "",
-                    ts, cv, round_id, cache_hit, retry_count, str(raw_path),
-                    confidence=llm.get("confidence", 0.7),
-                    evidence_span=llm.get("evidence_span", text[:60]),
-                    reason=llm.get("reason", ""),
-                    uncertain=llm.get("uncertain", False),
-                    ignored_fields=ignored))
-        except Exception as e:
-            results.append(_build_result(uid, coder_id, None, False,
-                str(e), ts, cv, round_id, cache_hit, retry_count, ""))
-    return results
-
-
-def _run_mock_coding(units, codebook_version, rd, ts):
+def _run_mock_coding(units, codebook_version, round_id, rd, ts):
     """Mock coding using MockCoderAgent — for testing only, not production."""
     from .coder import MockCoderAgent
-    ra = _mock_results(MockCoderAgent("A", 42).code(units, codebook_version), "A", rd, ts)
-    rb = _mock_results(MockCoderAgent("B", 43).code(units, codebook_version), "B", rd, ts)
+    ra = _mock_results(
+        MockCoderAgent("A", 42).code(units, codebook_version), "A",
+        codebook_version, round_id, rd, ts,
+    )
+    rb = _mock_results(
+        MockCoderAgent("B", 43).code(units, codebook_version), "B",
+        codebook_version, round_id, rd, ts,
+    )
     return ra, rb
 
 
@@ -176,7 +141,6 @@ def _run_real_coding(units, prompt_a, prompt_b, valid, rd, log_dir, ts,
     if concurrency < 1:
         raise ValueError(f"concurrency must be >= 1, got {concurrency}")
 
-    # Check for duplicate unit_ids before processing
     uids = [u.get("unit_id", "").strip() for u in units]
     seen = set()
     for uid in uids:
@@ -197,7 +161,6 @@ def _run_real_coding(units, prompt_a, prompt_b, valid, rd, log_dir, ts,
         user = f"unit_id: {uid}\ncontext: {ctx}\nunit_text: {text}"
         client = DeepSeekClient(cache_dir=log_dir / f"cache_{coder_id}")
         cache_hit = False
-        retry_count = 0
 
         try:
             cache_key = client._cache_key(prompt, user, 800)
@@ -236,18 +199,15 @@ def _run_real_coding(units, prompt_a, prompt_b, valid, rd, log_dir, ts,
             else:
                 results_b[uid] = result
 
-    # Write unified API log (main thread, single writer)
     if all_call_logs:
         _write_api_log(log_dir, all_call_logs)
 
-    # Preserve input order
     ra_list = [results_a[u.get("unit_id", "")] for u in units if u.get("unit_id", "") in results_a]
     rb_list = [results_b[u.get("unit_id", "")] for u in units if u.get("unit_id", "") in results_b]
     return ra_list, rb_list
 
 
-def _write_api_log(log_dir: Path, entries: list[dict]) -> None:
-    """Write unified API call log — overwrites to prevent cross-run accumulation."""
+def _write_api_log(log_dir, entries):
     log_dir.mkdir(parents=True, exist_ok=True)
     p = log_dir / "deepseek_api_calls.jsonl"
     with open(p, "w", encoding="utf-8") as f:
@@ -255,7 +215,7 @@ def _write_api_log(log_dir: Path, entries: list[dict]) -> None:
             f.write(json.dumps(entry, ensure_ascii=False) + "\n")
 
 
-def _mock_results(mock_items, coder_id, rd, ts):
+def _mock_results(mock_items, coder_id, codebook_version, round_id, rd, ts):
     """Adapt MockCoderAgent output to full schema."""
     results = []
     for m in mock_items:
@@ -263,7 +223,7 @@ def _mock_results(mock_items, coder_id, rd, ts):
             m.get("unit_id",""), coder_id,
             m.get("primary_code") if m.get("parse_ok") else None,
             m.get("parse_ok", False),
-            m.get("error", ""), ts, "v1.0", "round_01", False, 0, "",
+            m.get("error", ""), ts, codebook_version, round_id, False, 0, "",
             confidence=m.get("confidence"), evidence_span=m.get("evidence_span",""),
             reason=m.get("reason",""), uncertain=m.get("uncertain", False)))
     return results
